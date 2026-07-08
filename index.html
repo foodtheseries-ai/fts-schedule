@@ -149,6 +149,8 @@ function cloneDay(dd){ dd=dd||{};
 
 function solveAll(state, opts){
   opts=opts||{};
+  // วันเริ่มงาน: ต้องรู้วันที่จริงของแต่ละช่องในสัปดาห์ เพื่อไม่จัดคนก่อนวันเริ่มงาน (ปูนาเริ่ม 8 → จ/อ ไม่จัด)
+  if(!state.weekDates){ try{ state=Object.assign({},state,{weekDates:weekDates().map(isoDate)}); }catch(e){} }
   // best-of-8: ลอง 8 seed เลือกผลที่ขาดน้อยสุดอัตโนมัติ (deterministic จาก seed หลัก) — ลำดับเลือกคนต่างกันทำให้วันท้ายๆ รอดต่างกัน
   if(!opts._single){
     var best=null, bestCost=Infinity;
@@ -177,13 +179,18 @@ function solveAll(state, opts){
     return { id:e.id, name:e.name, branchId:e.branchId,
       positions:(e.positions&&e.positions.length)?e.positions:[],
       aM:none||!!ps.morning, aMid:none||!!ps.mid, aL:none||!!ps.late, home:home,
-      off:e.off||[], loanOk:!!e.loanOk, cg:e.commuteGroup||null, canOt:!!e.canOt, canSplit:!!e.canSplit }; });
+      off:e.off||[], loanOk:!!e.loanOk, cg:e.commuteGroup||null, canOt:!!e.canOt, canSplit:!!e.canSplit, hiredAt:e.hiredAt||null }; });
   var Emap={}; E.forEach(function(e){ Emap[e.id]=e; });
+  var wkDates=state.weekDates||null;   // ['2026-07-06',...] อิงสัปดาห์ที่กำลังจัด
+  var hiredBlock=function(e,d){ return !!(e.hiredAt && wkDates && wkDates[d] && wkDates[d] < e.hiredAt); }; // วันนั้นก่อนวันเริ่มงาน = ยังไม่จัด
+  var availDays=function(e){ var n=0; for(var d=0;d<7;d++){ if(!hiredBlock(e,d)) n++; } return n; };  // จำนวนวันที่จัดได้จริง (หักวันก่อนเริ่มงาน)
   var weeks={}; branches.forEach(function(b){ weeks[b.id]={}; for(var d=0;d<7;d++){ weeks[b.id][d]={}; SLOTS.forEach(function(sl){ weeks[b.id][d][sl]=[]; }); } });
   var gSlots={}, gDays={}, gHours={}, gLoan={}, gTrip={};   // gTrip: ทริปยืม from|to|วัน → กะ (รวมรถ)
   var slotsOfDay=function(id,d){ return gSlots[id+'|'+d]||[]; };
   var workDays=function(id){ return Object.keys(gDays[id]||{}).length; };
-  var prevNight=function(id,d){ return d>0 && slotsOfDay(id,d-1).indexOf('night')>=0; };
+  // H4 ข้ามสัปดาห์: d=0 (จันทร์) ดูดึกอาทิตย์ของสัปดาห์ก่อนจาก state (prevWeekSunNight) · ข้อยกเว้นหน้างานจริงที่มี a.t เริ่ม≥10:00 = กะที่ pre-place ไว้ ไม่ผ่าน eligible อยู่แล้ว จึงไม่ถูกบล็อก
+  var prevWk=state.prevWeekSunNight||{};
+  var prevNight=function(id,d){ return d>0 ? slotsOfDay(id,d-1).indexOf('night')>=0 : !!prevWk[id]; };
   var cellPos=function(bid,d,slot,pos){ return weeks[bid][d][slot].filter(function(a){return a.pos===pos;}).length; };
   var doAssign=function(bid,d,slot,e,pos,via,locked){ weeks[bid][d][slot].push({id:e.id,pos:pos,via:via,homeBranch:e.branchId,locked:!!locked});
     var k=e.id+'|'+d; (gSlots[k]=gSlots[k]||[]).push(slot);
@@ -218,10 +225,10 @@ function solveAll(state, opts){
     } });
 
   // ใครใช้วันหยุดไปแล้วในวันที่ล็อกไว้ (มีวันว่างในวันที่ไม่ regen) → วันจัดใหม่ต้องทำทุกวัน ห้ามได้หยุดซ้ำ
-  var mustFull={}; E.forEach(function(e){ for(var d=0;d<7;d++){ if(!regenSet[d] && !slotsOfDay(e.id,d).length){ mustFull[e.id]=1; break; } } });
+  var mustFull={}; E.forEach(function(e){ for(var d=0;d<7;d++){ if(!regenSet[d] && !slotsOfDay(e.id,d).length && !hiredBlock(e,d)){ mustFull[e.id]=1; break; } } });
   var hasStored=false; for(var dS=0;dS<7;dS++){ if(!regenSet[dS]) hasStored=true; }
   if(!hasStored) mustFull={};   // สัปดาห์จัดใหม่ทั้งสัปดาห์ = ยังไม่มีใครใช้วันหยุด
-  var targetOf=function(e){ return mustFull[e.id]?7:6; };
+  var targetOf=function(e){ return Math.min(mustFull[e.id]?7:6, availDays(e)); };   // คนเริ่มงานกลางสัปดาห์ทำได้ไม่ถึง 6 (ไม่นับเป็นขาด)
   // กฎทิศทางยืม (ซัน 8 ก.ค.): พญาไทคนเยอะ = ส่งออกอย่างเดียว ห้ามรับเข้า · สาทร/สข77 ห้ามส่งคนออก
   // ยกเว้นคู่รถบาส+จ๋า (พักสาทร ทำงานสข77) สลับ สาทร↔สข77 ได้ตามเหมาะสม
   var canLoanTo=function(e,bid){
@@ -230,6 +237,7 @@ function solveAll(state, opts){
     if(e.cg && (brName[bid]==='สาทร'||brName[bid]==='สุขุมวิท 77')) return true;
     return false; };
   var eligible=function(e,bid,d,slot,pos,loan){
+    if(hiredBlock(e,d)) return false;                 // ก่อนวันเริ่มงาน — ยังไม่จัด
     if(SLOTM[slot].splitOnly && !e.canSplit) return false; // พีคสั้นเฉพาะคนเบรค — คนอื่นเต็ม 10 ชม.
     if(e.positions.indexOf(pos)<0) return false;      // H5
     // H2 v8: วันหยุดที่ขอ = soft (โดนหักคะแนนใน score) — พนักงานประจำต้องครบ 6 วัน ระบบเลือกวันหยุดตามหน้างาน
@@ -278,6 +286,7 @@ function solveAll(state, opts){
   // กำลังคนตึงมาก (คนว่าง/วัน ≈ ที่ต้องใช้/วัน) — greedy พลาดง่าย matching การันตีเติมได้มากสุด
   // ลำดับช่อง: ดึก (คนเข้าได้น้อยสุด) → เช้า → พีค · augment ของพีคจะ reroute สมอได้แต่ไม่ทำให้สมอหลุด
   var canServe=function(e,s,d){
+    if(hiredBlock(e,d)) return false;                    // ก่อนวันเริ่มงาน
     if(slotsOfDay(e.id,d).length) return false;          // มีกะแล้ว (pre-place/ล็อก)
     var loan=e.branchId!==s.bid; if(loan&&(!e.loanOk||!canLoanTo(e,s.bid))) return false;
     if(s.slot==='night'){ var nx=slotsOfDay(e.id,d+1);   // H4 มองไปข้างหน้า: พรุ่งนี้มีกะสาย (วันล็อก/เก็บไว้) ห้ามลงดึกวันนี้
@@ -328,6 +337,7 @@ function solveAll(state, opts){
           while(cellPos(bid,d,slot,pos)<need && guard<40){ guard++;
             var best=null,bs=-1e9,bestLoc=null,bestR=null;
             E.forEach(function(P){
+              if(hiredBlock(P,d)) return;
               if(slotsOfDay(P.id,d).length) return;
               var loan=P.branchId!==bid; if(loan&&(!P.loanOk||!canLoanTo(P,bid))) return;
               if(P.positions.indexOf(pos)<0) return; if(!slotAvail(P,slot)) return;
@@ -410,6 +420,7 @@ function solveAll(state, opts){
     [0,1,6,2,5,3,4].forEach(function(d){ if(!regenSet[d]) return;
       E.forEach(function(e){
         if(workDays(e.id)>=targetOf(e)) return;
+        if(hiredBlock(e,d)) return;                     // ก่อนวันเริ่มงาน — ไม่เติม
         if(skipPrefOff && e.off.indexOf(d)>=0) return;
         if(slotsOfDay(e.id,d).length) return;
         if((gHours[e.id]||0)+10 > (e.canOt?72:60)) return;
@@ -427,9 +438,9 @@ function solveAll(state, opts){
         doAssign(e.branchId,d,ok[0],e,(e.positions[0]||'cook'),'home'); }); }); };
   fillTo6(true); fillTo6(false);
   // นับคนที่ยังไม่ถึงเป้าวัน (ใช้เลือก seed ที่จัดครบกว่า)
-  var underTarget=0; E.forEach(function(e){ var free=0; for(var d=0;d<7;d++){ if(regenSet[d]&&!slotsOfDay(e.id,d).length) free++; }
+  var underTarget=0; E.forEach(function(e){ var free=0; for(var d=0;d<7;d++){ if(regenSet[d]&&!slotsOfDay(e.id,d).length&&!hiredBlock(e,d)) free++; }
     if(mustFull[e.id]&&free>0) underTarget+=free;
-    else if(!mustFull[e.id]&&workDays(e.id)<6) underTarget+=(6-workDays(e.id)); });
+    else if(!mustFull[e.id]&&workDays(e.id)<targetOf(e)) underTarget+=(targetOf(e)-workDays(e.id)); });
 
   // ใครถูกจัดบ้าง (ข้ามสาขา) — ใช้เช็ค "จัดครบทุกคนไหม"
   var scheduled={}; branches.forEach(function(b){ for(var d=0;d<7;d++) SLOTS.forEach(function(sl){ weeks[b.id][d][sl].forEach(function(a){ scheduled[a.id]=1; }); }); });
@@ -459,7 +470,7 @@ function solveAll(state, opts){
       if(a.via==='loan'){ var he=Emap[a.id]; loanersReal.push({name:he?he.name:'?', fromId:a.homeBranch, from:brName[a.homeBranch]||'', d:d, slot:sl, pos:a.pos}); } }); }); })(dl); }
     var noRest=bEmps.filter(function(e){return workDays(e.id)>=7 && !e.canOt;}).map(function(e){return e.name;});
     var unscheduled=bEmps.filter(function(e){return !scheduled[e.id];}).map(function(e){return {id:e.id,name:e.name}; });
-    var fair=bEmps.map(function(e){ var days=workDays(e.id), hours=gHours[e.id]||0; return {id:e.id,name:e.name,days:days,hours:hours}; });
+    var fair=bEmps.map(function(e){ var days=workDays(e.id), hours=gHours[e.id]||0; return {id:e.id,name:e.name,days:days,hours:hours,target:targetOf(e),avail:availDays(e)}; });
     // วันหยุดจริง = วันที่ไม่ได้เข้ากะ (ระบบเลือกให้ตามหน้างาน) + จดว่าใครไม่ตรงวันที่ขอ
     var offByDay={}; var offMoved=[];
     for(var d3=0;d3<7;d3++){ (function(d){ offByDay[d]=bEmps.filter(function(e){return !slotsOfDay(e.id,d).length;}).map(function(e){return e.name;}); })(d3); }
@@ -479,16 +490,21 @@ function solveAll(state, opts){
 
 /* ===== STATE ===== */
 var S={ mode:'view', viewMode:'day', seed:7, selDay:null, weekOffset:0, activeBranch:null, branches:[], employees:[], learnings:[],
-  grid:{}, editEmp:null, editCell:null, genOpen:false, genDays:[0,1,2,3,4,5,6], toast:null, loading:true };
+  grid:{}, prevWeekSunNight:{}, editEmp:null, editCell:null, genOpen:false, genDays:[0,1,2,3,4,5,6], toast:null, loading:true };
 var _tt=null;
 function toast(m){ S.toast=m; render(); clearTimeout(_tt); _tt=setTimeout(function(){ S.toast=null; render(); },2000); }
 function empById(id){ return S.employees.find(function(x){return x.id===id;}); }
 function weekStartIso(){ return isoDate(weekDates()[0]); }
+function prevWeekStartIso(){ var m=new Date(weekDates()[0]); m.setDate(m.getDate()-7); return isoDate(m); }
+// คนเข้าดึกวันอาทิตย์ (d=6) ของ grid ที่ส่งมา → {empId:1} ใช้กันกะสายวันจันทร์สัปดาห์ถัดไป (H4 ข้ามสัปดาห์)
+function sunNightSet(grid){ var s={}; if(!grid) return s;
+  Object.keys(grid).forEach(function(bid){ var d6=(grid[bid]||{})[6]; if(!d6) return;
+    (d6.night||[]).forEach(function(a){ if(a&&a.id!=null) s[a.id]=1; }); }); return s; }
 
 function load(){
-  Promise.all([api('sched_all'), api('sched_grid_get',{p_week:weekStartIso()})]).then(function(res){
+  Promise.all([api('sched_all'), api('sched_grid_get',{p_week:weekStartIso()}), api('sched_grid_get',{p_week:prevWeekStartIso()})]).then(function(res){
     var d=res[0]; S.branches=d.branches; S.employees=d.employees; S.seed=d.seed; S.learnings=d.learnings||[];
-    S.grid=res[1]||{};
+    S.grid=res[1]||{}; S.prevWeekSunNight=sunNightSet(res[2]);
     if(!S.activeBranch||!S.branches.some(function(b){return b.id===S.activeBranch;})) S.activeBranch=(S.branches[0]||{}).id;
     S.loading=false; render();
   }).catch(function(e){ S.loading=false; document.getElementById('app').innerHTML='<div style="padding:40px;text-align:center;color:#C0392B;">โหลดไม่สำเร็จ<br><small>'+esc(e.message)+'</small></div>'; });
@@ -498,7 +514,7 @@ function storedDaysSet(){ var s={}; Object.keys(S.grid||{}).forEach(function(bid
 var _solMemo={key:null,val:null};
 function getSol(){ var stored=storedDaysSet(); var regen=[]; for(var d=0;d<7;d++) if(!stored[d]) regen.push(d);
   // memo: solve ใหม่เฉพาะเมื่อ state ที่มีผลเปลี่ยน (best-of-8 seeds ~200ms — ไม่ควรรันทุก render)
-  var key=JSON.stringify([S.seed,S.weekOffset,S.grid,S.branches.map(function(b){return b.plan;}),S.employees,S.learnings.length]);
+  var key=JSON.stringify([S.seed,S.weekOffset,S.grid,S.branches.map(function(b){return b.plan;}),S.employees,S.learnings.length,S.prevWeekSunNight]);
   if(_solMemo.key===key) return _solMemo.val;
   var val=solveAll(S, {storedGrid:S.grid||{}, regenDays:regen});
   _solMemo={key:key,val:val}; return val; }
@@ -519,7 +535,8 @@ function setViewMode(m){ S.viewMode=m; render(); }
 function pickBranch(bid){ S.activeBranch=bid; S.selDay=null; S.editEmp=null; S.editCell=null; render(); }
 function selDay(d){ S.selDay=d; render(); }
 function navWeek(n){ var o=(S.weekOffset||0)+n; if(o<0||o>3) return; S.weekOffset=o; S.selDay=null;
-  api('sched_grid_get',{p_week:weekStartIso()}).then(function(g){ S.grid=g||{}; render(); }); render(); }
+  Promise.all([api('sched_grid_get',{p_week:weekStartIso()}), api('sched_grid_get',{p_week:prevWeekStartIso()})])
+    .then(function(r){ S.grid=r[0]||{}; S.prevWeekSunNight=sunNightSet(r[1]); render(); }); render(); }
 
 function setPlan(bid,key){ var p=PLANS.find(function(x){return x.key===key;});
   api('sched_set_plan',{p_branch:bid,p_key:p.key,p_m:p.m,p_mid:p.mid,p_n:p.n}).then(function(){
@@ -593,7 +610,7 @@ function addPerson(empId,learnKind){ var c=S.editCell; materializeDay(c.d);
   p.then(function(){ toast('เพิ่ม '+e.name+' แล้ว (ล็อกไว้)'); }); render(); }
 
 /* employee prefs */
-function addEmp(){ S.editEmp={id:null,branchId:S.activeBranch,name:'',positions:[],preferredSlots:[],off:[],loanOk:false,canOt:false,canSplit:false}; S.mode='setup'; render(); }
+function addEmp(){ S.editEmp={id:null,branchId:S.activeBranch,name:'',positions:[],preferredSlots:[],off:[],loanOk:false,canOt:false,canSplit:false,hiredAt:null}; S.mode='setup'; render(); }
 function editEmp(id){ var e=empById(id); S.editEmp=Object.assign({},e,{positions:(e.positions||[]).slice(),preferredSlots:(e.preferredSlots||[]).slice(),off:(e.off||[]).slice()}); S.mode='setup'; render(); }
 function closeSheet(){ S.editEmp=null; render(); }
 function setName(v){ if(S.editEmp) S.editEmp.name=v; }
@@ -601,7 +618,8 @@ function toggleArr(field,val){ var a=(S.editEmp[field]||[]).slice(); var i=a.ind
 function pickDraftBranch(bid){ S.editEmp.branchId=bid; render(); }
 function toggleLoan(){ S.editEmp.loanOk=!S.editEmp.loanOk; render(); }
 function rpcEmpArgs(e,over){ var m=Object.assign({},e,over||{});
-  return { p_id:m.id, p_branch:m.branchId, p_name:m.name, p_positions:m.positions, p_slots:(m.preferredSlots||[]), p_off:m.off||[], p_loan:!!m.loanOk, p_ot:!!m.canOt, p_split:!!m.canSplit }; }
+  return { p_id:m.id, p_branch:m.branchId, p_name:m.name, p_positions:m.positions, p_slots:(m.preferredSlots||[]), p_off:m.off||[], p_loan:!!m.loanOk, p_ot:!!m.canOt, p_split:!!m.canSplit, p_hired:m.hiredAt||null }; }
+function setHired(v){ S.editEmp.hiredAt=(v||'').trim()||null; }
 function toggleOt(){ S.editEmp.canOt=!S.editEmp.canOt; render(); }
 function toggleSplit(){ S.editEmp.canSplit=!S.editEmp.canSplit; render(); }
 function capToggle(fn,on,icon,title,sub){
@@ -614,8 +632,8 @@ function enableLoan(empId,who){ var e=empById(empId); if(!e) return; api('sched_
 function saveEmp(){ var d=S.editEmp; if(!d||!d.name||!d.name.trim()||!d.positions||!d.positions.length){ toast('ใส่ชื่อและตำแหน่งก่อน'); return; }
   d.name=d.name.trim();
   api('sched_emp_save',rpcEmpArgs(d)).then(function(newId){
-    if(d.id){ var e=empById(d.id); if(e) Object.assign(e,{name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk}); }
-    else { S.employees.push({id:newId,name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk,canOt:!!d.canOt,canSplit:!!d.canSplit,commuteGroup:null}); }
+    if(d.id){ var e=empById(d.id); if(e) Object.assign(e,{name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk,hiredAt:d.hiredAt||null}); }
+    else { S.employees.push({id:newId,name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk,canOt:!!d.canOt,canSplit:!!d.canSplit,commuteGroup:null,hiredAt:d.hiredAt||null}); }
     S.editEmp=null; toast('บันทึกแล้ว');
   }).catch(function(e){ toast('บันทึกไม่สำเร็จ'); }); }
 function deleteEmp(){ var id=S.editEmp.id; if(!id){ closeSheet(); return; }
@@ -895,6 +913,44 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
   h+='<button onclick="lockApp()" style="width:100%;margin-top:4px;border:none;background:none;cursor:pointer;font-weight:600;font-size:11.5px;color:#9A8C7C;display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_lock,12,'#9A8C7C',2)+'ล็อกเครื่องนี้ (กลับเป็นดูอย่างเดียว)</button>';
   h+='</div>';
 
+  // ===== สถานะวันหยุด: ใครหยุดไปแล้ว / ใครยังไม่ได้หยุด (สัปดาห์ที่กำลังดู) — จัดตารางหยุดให้ครบ ไม่หยุดซ้ำ =====
+  if(!branchEmpty){
+    var solRest=getSol(); var wkD=weekDates().map(isoDate);
+    var restRows=[];
+    S.employees.forEach(function(e){
+      var work={}, off=[];
+      var sb=solRest[e.branchId]; if(!sb) return;
+      for(var d=0;d<7;d++){ var has=false;
+        S.branches.forEach(function(b){ var w=solRest[b.id].week[d]||{}; SLOTS.forEach(function(sl){ (w[sl]||[]).forEach(function(a){ if(a.id===e.id) has=true; }); }); });
+        var preHire = e.hiredAt && wkD[d] && wkD[d] < e.hiredAt;
+        if(has) work[d]=1; else if(!preHire) off.push(d);
+      }
+      var nWork=Object.keys(work).length;
+      var startsThisWk = e.hiredAt && wkD[0]<e.hiredAt && e.hiredAt<=wkD[6];  // เริ่มกลางสัปดาห์จริง (หลังวันจันทร์) เท่านั้น
+      restRows.push({name:e.name, br:(S.branches.find(function(b){return b.id===e.branchId;})||{}).short||'', off:off, nWork:nWork, rested:off.length>0, startsThisWk:startsThisWk, hiredAt:e.hiredAt});
+    });
+    var noRest=restRows.filter(function(r){return !r.rested;});
+    var rested=restRows.filter(function(r){return r.rested;});
+    h+='<div style="background:#fff;border-radius:16px;padding:13px 15px;margin-top:13px;box-shadow:0 10px 24px -22px rgba(26,26,46,.5);border:1px solid #F3EADD;">';
+    h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;"><div style="font-weight:700;font-size:14px;">สถานะวันหยุด · '+weekLabel()+'</div>'+
+       '<span class="num" style="font-size:11px;font-weight:700;color:#7A6A57;">หยุดแล้ว '+rested.length+' · ค้าง '+noRest.length+'</span></div>';
+    if(noRest.length){
+      h+='<div style="background:#FBE6DE;border-radius:12px;padding:9px 12px;">';
+      h+='<div style="display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;color:#A2392B;margin-bottom:6px;">'+svg(I_alert,14,'#C0392B',2)+'ยังไม่ได้หยุด ('+noRest.length+' คน) — ต้องจัดวันหยุดให้</div>';
+      h+='<div style="display:flex;flex-wrap:wrap;gap:5px;">'+noRest.sort(function(a,b){return b.nWork-a.nWork;}).map(function(r){
+        return '<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid #F0C9BE;border-radius:8px;padding:3px 9px;font-size:11px;font-weight:600;color:#8A3324;">'+esc(r.name)+' <span class="num" style="color:#B0725F;font-weight:700;">'+r.nWork+'วัน</span>'+(r.startsThisWk?' <span style="color:#2C7A56;font-size:9px;font-weight:700;">เริ่ม '+r.hiredAt.slice(8)+'/'+r.hiredAt.slice(5,7)+'</span>':'')+'</span>'; }).join('')+'</div></div>';
+    } else {
+      h+='<div style="display:flex;align-items:center;gap:8px;background:#DCEFE4;border-radius:12px;padding:9px 12px;">'+svg(I_check,15,'#2C7A56',2.2)+'<span style="font-size:11.5px;color:#235C40;font-weight:600;">ทุกคนมีวันหยุดครบแล้วสัปดาห์นี้</span></div>';
+    }
+    if(rested.length){
+      h+='<div style="font-size:11px;font-weight:700;color:#235C40;margin:10px 2px 6px;">หยุดแล้ว ('+rested.length+' คน)</div>';
+      h+='<div style="display:flex;flex-wrap:wrap;gap:5px;">'+rested.sort(function(a,b){return (a.off[0]||0)-(b.off[0]||0);}).map(function(r){
+        return '<span style="display:inline-flex;align-items:center;gap:4px;background:#EEF6F0;border:1px solid #CDE6D6;border-radius:8px;padding:3px 9px;font-size:11px;font-weight:600;color:#2C6446;">'+esc(r.name)+' <span style="color:#5E9B78;font-weight:700;">'+r.off.map(function(d){return DOW[d];}).join(',')+'</span></span>'; }).join('')+'</div>';
+    }
+    h+='<div style="font-size:10px;color:#9A8C7C;margin-top:9px;line-height:1.5;">"ค้าง" = ยังไม่มีวันหยุดในสัปดาห์นี้ (ทำครบทุกวันที่จัด) · คนเริ่มงานกลางสัปดาห์ระบบไม่นับวันก่อนเริ่มเป็นวันหยุด</div>';
+    h+='</div>';
+  }
+
   // ===== สรุปทั้งเครือ (อ่านจบจุดเดียว ไม่ต้องไล่ดูราย่สาขา) =====
   if(!branchEmpty){
     var allSol=getSol();
@@ -905,7 +961,7 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
       sb.noRest.forEach(function(n){ noRestAll.push(n); });
       sb.loaners.forEach(function(l){ var k=esc(l.from)+' → '+esc(b.short)+' · '+DOWF[l.d];
         (allTrips[k]=allTrips[k]||[]).push({txt:esc(l.name)+' ('+SLOTM[l.slot].label+')', start:SLOT_START[l.slot]}); });
-      sb.fair.forEach(function(f){ if(f.days>=7) otPeople[f.name]=f.days; if(f.days<6) lowHours.push(esc(f.name)+' '+f.days+' วัน'); });
+      sb.fair.forEach(function(f){ if(f.days>=7) otPeople[f.name]=f.days; if(f.days<Math.min(6,(f.avail!=null?f.avail:6))) lowHours.push(esc(f.name)+' '+f.days+' วัน'+((f.avail!=null&&f.avail<6)?(' (เริ่มงานกลางสัปดาห์ ทำได้ '+f.avail+')'):'')); });
       (sb.offMoved||[]).forEach(function(m){ offMovedAll.push(esc(m.name)+' (ขอ'+DOW[m.want]+' → ได้'+DOW[m.got]+')'); });
     });
     h+='<div style="background:#fff;border-radius:16px;padding:13px 15px;margin-top:13px;box-shadow:0 10px 24px -22px rgba(26,26,46,.5);border:1px solid #F3EADD;">';
@@ -1110,6 +1166,8 @@ function renderSheet(){
   DOW.forEach(function(dw,i){ var on=d.off.indexOf(i)>=0;
     h+='<button onclick="toggleArr(\'off\','+i+')" style="flex:1;min-width:0;border:1.5px solid '+(on?'#C0392B':'#EFD9CF')+';background:'+(on?'#FBE6DE':'#fff')+';color:'+(on?'#B24A2E':'#8A7E6E')+';border-radius:11px;padding:9px 0;cursor:pointer;font-weight:700;font-size:12px;">'+dw+'</button>'; });
   h+='</div>';
+  h+='<label style="display:block;font-size:12px;font-weight:700;color:#7A6A57;margin:16px 2px 7px;">วันเริ่มงาน <span style="color:#B0A090;font-weight:600;">(ใช้จัดตาราง — ไม่จัดก่อนวันนี้ · คิดเงินเดือน)</span></label>';
+  h+='<input type="date" value="'+esc(d.hiredAt||'')+'" onchange="setHired(this.value)" style="width:100%;border:1.5px solid #EFD9CF;background:#fff;border-radius:13px;padding:12px 14px;font-family:\'Anuphan\',sans-serif;font-size:15px;color:#1A1A2E;">';
   h+='<label style="display:block;font-size:12px;font-weight:700;color:#7A6A57;margin:16px 2px 7px;">สาขาหลัก</label>';
   h+='<div style="display:flex;gap:7px;flex-wrap:wrap;">';
   S.branches.forEach(function(b){ var on=d.branchId===b.id;
