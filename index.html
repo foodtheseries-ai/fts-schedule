@@ -35,18 +35,33 @@ function api(fn,args){ return fetch(SUPA+'/rest/v1/rpc/'+fn,{method:'POST',
 
 /* ===== meta ===== */
 var POSM={cook:{label:'กุ๊ก',color:'#C4571E',bg:'#FBE9D2'}, kasst:{label:'ผู้ช่วยครัว',color:'#2C7A56',bg:'#DCEFE4'}, cash:{label:'แคชเชียร์',color:'#2960C4',bg:'#E4F0FF'}};
-var SLOTM={morning:{label:'เช้า',dot:'#F2B45A',time:'08:00–18:00'}, mid:{label:'กลาง',dot:'#6A5AC0',time:'11:00–17:00'}, night:{label:'ดึก',dot:'#3E8FC4',time:'17:00–03:00'}};
+// 4 กะ: สมอ(เช้า/ดึก 10ชม.) + พีคสั้น(เที่ยง/เย็น 4ชม. จ่ายเฉพาะช่วงพีค = ประหยัด)
+var SLOTM={
+  morning:{label:'กะเช้า',dot:'#F2B45A',time:'08:00–18:00',hours:10,anchor:true},
+  lunch:{label:'พีคเที่ยง',dot:'#E5A93D',time:'10:00–14:00',hours:4,peak:true},
+  dinner:{label:'พีคเย็น',dot:'#E76F51',time:'17:00–21:00',hours:4,peak:true},
+  night:{label:'กะดึก',dot:'#3E8FC4',time:'17:00–03:00',hours:10,anchor:true}
+};
+var SLOTS=['morning','lunch','dinner','night'];   // ลำดับแสดง
+var FILL_ORDER=['morning','night','lunch','dinner']; // สมอก่อน แล้วพีค
 var DOW=['จ','อ','พ','พฤ','ศ','ส','อา'];
 var DOWF=['จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์','อาทิตย์'];
 var SLOT_DB2ENG={morning:'morning',mid:'mid',late:'night'};
+var PREFM={morning:{label:'เช้า',dot:'#F2B45A'}, mid:{label:'กลางวัน',dot:'#E5A93D'}, late:{label:'ดึก',dot:'#3E8FC4'}};
 var PLANS=[
-  {key:'lean',label:'ประหยัด',desc:'กุ๊ก 1 ต่อกะ',m:0,mid:0,n:0},
-  {key:'std',label:'มาตรฐาน',desc:'กุ๊ก 2 เช้า/ดึก',m:1,mid:0,n:1},
-  {key:'busy',label:'คนเยอะ',desc:'เช้า 3·กลาง 1·ดึก 3',m:2,mid:1,n:2},
-  {key:'max',label:'จัดเต็ม',desc:'เช้า 4·กลาง 1·ดึก 4',m:3,mid:1,n:3}
+  {key:'lean',label:'ประหยัด',desc:'พอเปิดร้าน · ไม่เสริมพีค',m:0,mid:0,n:0},
+  {key:'peak',label:'คุมพีค',desc:'กะสมอน้อย + กะพีคสั้น (ประหยัดสุด)',m:0,mid:2,n:0},
+  {key:'std',label:'มาตรฐาน',desc:'กุ๊ก 2 เช้า/ดึก + เสริมพีค',m:1,mid:2,n:1},
+  {key:'max',label:'จัดเต็ม',desc:'แน่นทั้งวัน + พีค',m:2,mid:3,n:2}
 ];
-function demandOf(plan){ plan=plan||{cook_m:0,cook_mid:0,cook_n:0};
-  return {morning:{cook:1+(plan.cook_m||0),kasst:1,cash:1}, mid:{cook:(plan.cook_mid||0),kasst:0,cash:0}, night:{cook:1+(plan.cook_n||0),kasst:1,cash:1}}; }
+// demand: สมอ = min+เสริมกุ๊ก(อยู่ทั้งกะ) · พีค = ส่วนที่ต้องการช่วงขายดี "เกินจากกะสมอ" → จ่ายกะสั้น (ประหยัด)
+// กะเช้าครอบพีคเที่ยง · กะดึกครอบพีคเย็น → block พีค = max(0, ต้องการพีค − กุ๊กเสริมกะสมอ)
+function demandOf(plan){ plan=plan||{}; var m=plan.cook_m||0, n=plan.cook_n||0, peak=plan.cook_mid||0;
+  return {morning:{cook:1+m,kasst:1,cash:1},
+          lunch:{cook:Math.max(0,peak-(1+m)),kasst:0,cash:0},   // เกินจากกุ๊กกะเช้าที่อยู่ช่วงเที่ยง
+          dinner:{cook:Math.max(0,peak-(1+n)),kasst:0,cash:0},  // เกินจากกุ๊กกะดึกที่อยู่ช่วงเย็น
+          night:{cook:1+n,kasst:1,cash:1}}; }
+function peakWant(plan){ return plan&&plan.cook_mid||0; }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 function hashN(str){ var h=0; for(var i=0;i<str.length;i++) h=((h*31)+str.charCodeAt(i))>>>0; return h; }
 function weekDates(){ var t=new Date(); var wd=(t.getDay()+6)%7; var mon=new Date(t); mon.setHours(0,0,0,0); mon.setDate(t.getDate()-wd);
@@ -83,9 +98,9 @@ function buildLearnMap(learnings){
   });
   return m;
 }
-function cloneDay(dd){ dd=dd||{morning:[],mid:[],night:[]};
-  var o={morning:[],mid:[],night:[]};
-  ['morning','mid','night'].forEach(function(s){ (dd[s]||[]).forEach(function(a){ o[s].push({id:a.id,pos:a.pos,via:a.via,homeBranch:a.homeBranch,locked:!!a.locked}); }); });
+function cloneDay(dd){ dd=dd||{};
+  var o={}; SLOTS.forEach(function(s){ o[s]=[]; });
+  SLOTS.forEach(function(s){ (dd[s]||[]).forEach(function(a){ o[s].push({id:a.id,pos:a.pos,via:a.via,homeBranch:a.homeBranch,locked:!!a.locked}); }); });
   return o; }
 
 function solveAll(state, opts){
@@ -99,91 +114,113 @@ function solveAll(state, opts){
   var brName={}, brPlan={}; branches.forEach(function(b){ brName[b.id]=b.short||b.name; brPlan[b.id]=b.plan||{}; });
   var learnMap=buildLearnMap(state.learnings);
   var E=state.employees.map(function(e){
-    var pref=(e.preferredSlots&&e.preferredSlots.length)?e.preferredSlots.map(function(s){return SLOT_DB2ENG[s]||s;}):['morning','mid','night'];
+    var ps={}; (e.preferredSlots||[]).forEach(function(s){ ps[s]=1; });
+    var none=!(ps.morning||ps.mid||ps.late);
+    var home = e.preferredSlots&&e.preferredSlots[0] ? (SLOT_DB2ENG[e.preferredSlots[0]]||'morning') : 'morning';
+    if(home==='mid') home='morning';
     return { id:e.id, name:e.name, branchId:e.branchId,
       positions:(e.positions&&e.positions.length)?e.positions:[],
-      pref:pref, home:pref[0]||'morning',
-      off:e.off||[], loanOk:!!e.loanOk, cg:e.commuteGroup||null }; });
+      aM:none||!!ps.morning, aMid:none||!!ps.mid, aL:none||!!ps.late, home:home,
+      off:e.off||[], loanOk:!!e.loanOk, cg:e.commuteGroup||null, canOt:!!e.canOt, canSplit:!!e.canSplit }; });
   var Emap={}; E.forEach(function(e){ Emap[e.id]=e; });
-  var weeks={}; branches.forEach(function(b){ weeks[b.id]={}; for(var d=0;d<7;d++) weeks[b.id][d]={morning:[],mid:[],night:[]}; });
-  var gAssigned={}, gWork={}, gLoan={};
-  var assignedG=function(id,d){ return !!gAssigned[id+'|'+d]; };
-  var prevNightB=function(bid,id,d){ return d>0 && weeks[bid][d-1].night.some(function(a){return a.id===id;}); };
-  var workCount=function(id){ return gWork[id]||0; };
+  var weeks={}; branches.forEach(function(b){ weeks[b.id]={}; for(var d=0;d<7;d++){ weeks[b.id][d]={}; SLOTS.forEach(function(sl){ weeks[b.id][d][sl]=[]; }); } });
+  var gSlots={}, gDays={}, gHours={}, gLoan={};   // เก็บข้ามสาขา (คน 1 คน)
+  var slotsOfDay=function(id,d){ return gSlots[id+'|'+d]||[]; };
+  var workDays=function(id){ return Object.keys(gDays[id]||{}).length; };
+  var prevNight=function(id,d){ return d>0 && slotsOfDay(id,d-1).indexOf('night')>=0; };
   var cellPos=function(bid,d,slot,pos){ return weeks[bid][d][slot].filter(function(a){return a.pos===pos;}).length; };
   var doAssign=function(bid,d,slot,e,pos,via,locked){ weeks[bid][d][slot].push({id:e.id,pos:pos,via:via,homeBranch:e.branchId,locked:!!locked});
-    gAssigned[e.id+'|'+d]=true; gWork[e.id]=(gWork[e.id]||0)+1; if(via==='loan') gLoan[e.id]=(gLoan[e.id]||0)+1; };
-  // slot ที่คนหนึ่งถูกจัดในวันนั้น (ข้ามสาขา) — ใช้กับ carpool
-  var slotOf=function(id,d){ var r=null; branches.forEach(function(b){ ['morning','mid','night'].forEach(function(sl){ if(weeks[b.id][d][sl].some(function(a){return a.id===id;})) r=sl; }); }); return r; };
+    var k=e.id+'|'+d; (gSlots[k]=gSlots[k]||[]).push(slot);
+    gDays[e.id]=gDays[e.id]||{}; gDays[e.id][d]=1; gHours[e.id]=(gHours[e.id]||0)+SLOTM[slot].hours;
+    if(via==='loan') gLoan[e.id]=(gLoan[e.id]||0)+1; };
+  var slotAvail=function(e,slot){ if(slot==='morning') return e.aM; if(slot==='night') return e.aL;
+    if(slot==='lunch') return e.aM||e.aMid; if(slot==='dinner') return e.aL||e.aMid; return true; };
+  // H1 + กะเบรค(split)/OT: ปกติ ≤1 กะ/วัน · split=พีคเที่ยง+พีคเย็น · OT=พีคเที่ยง+พีคเย็น หรือ พีคเที่ยง+ดึก
+  var canAddSlot=function(e,d,slot){ var cur=slotsOfDay(e.id,d);
+    if(cur.indexOf(slot)>=0) return false; if(cur.length===0) return true; if(cur.length>=2) return false;
+    var set={}; set[cur[0]]=1; set[slot]=1; var LD=set.lunch&&set.dinner, LN=set.lunch&&set.night;
+    if(e.canSplit && LD) return true; if(e.canOt && (LD||LN)) return true; return false; };
 
-  // 0) pre-place: วันที่ไม่ regen = คงทั้งวัน · วันที่ regen = เฉพาะที่ล็อกมือ
+  // 0) pre-place: วันไม่ regen = คงทั้งวัน · วัน regen = เฉพาะที่ล็อกมือ
   branches.forEach(function(b){ var sb=storedGrid[b.id]; if(!sb) return;
     for(var d=0;d<7;d++){ var sd=sb[d]; if(!sd) continue;
-      ['morning','mid','night'].forEach(function(slot){ (sd[slot]||[]).forEach(function(a){
-        if(!regenSet[d] || a.locked){ var e=Emap[a.id]; if(!e) return; if(gAssigned[a.id+'|'+d]) return;
+      SLOTS.forEach(function(slot){ (sd[slot]||[]).forEach(function(a){
+        if(!regenSet[d] || a.locked){ var e=Emap[a.id]; if(!e) return; if(slotsOfDay(a.id,d).indexOf(slot)>=0) return;
           weeks[b.id][d][slot].push({id:a.id,pos:a.pos,via:a.via||'home',homeBranch:a.homeBranch||e.branchId,locked:!!a.locked});
-          gAssigned[a.id+'|'+d]=true; gWork[a.id]=(gWork[a.id]||0)+1; if(a.via==='loan') gLoan[a.id]=(gLoan[a.id]||0)+1;
+          var k=a.id+'|'+d; (gSlots[k]=gSlots[k]||[]).push(slot);
+          gDays[a.id]=gDays[a.id]||{}; gDays[a.id][d]=1; gHours[a.id]=(gHours[a.id]||0)+SLOTM[slot].hours;
+          if(a.via==='loan') gLoan[a.id]=(gLoan[a.id]||0)+1;
         } }); });
     } });
 
   var eligible=function(e,bid,d,slot,pos,loan){
-    if(e.positions.indexOf(pos)<0) return false;
-    if(e.off.indexOf(d)>=0) return false;
-    if(assignedG(e.id,d)) return false;
-    if(slot==='morning'&&prevNightB(bid,e.id,d)) return false;
-    if(workCount(e.id)>=6) return false;
+    if(e.positions.indexOf(pos)<0) return false;      // H5
+    if(e.off.indexOf(d)>=0) return false;             // H2
+    if(!slotAvail(e,slot)) return false;              // สะดวกกะนั้น
+    if(!canAddSlot(e,d,slot)) return false;           // H1 + split/OT
+    if(slot==='morning'&&prevNight(e.id,d)) return false; // H4
+    if(slotsOfDay(e.id,d).length===0){ var maxD=e.canOt?7:6; if(workDays(e.id)>=maxD) return false; } // H3 (OT ได้ 7 วัน)
     if(loan){ if(e.branchId===bid) return false; if(!e.loanOk) return false; }
     else { if(e.branchId!==bid) return false; }
     return true; };
   var score=function(e,bid,d,slot,pos,loan){
-    var s=0;
+    var s=0; var peak=SLOTM[slot].peak;
     s += (e.positions[0]===pos)?1000:300;
-    s += (e.pref.indexOf(slot)>=0)?40:-40;
     s += (e.home===slot)?25:0;
-    s -= 30*workCount(e.id);
+    s -= 25*workDays(e.id) + 2*(gHours[e.id]||0);      // สมดุล: เกลี่ยวัน+ชั่วโมง
     if(loan) s -= 250 + 80*(gLoan[e.id]||0);
-    // learning bias
+    if(peak){ if(e.canSplit) s+=200; else if(e.canOt) s+=100;
+      var other = slot==='lunch'?'dinner':'lunch';
+      if(slotsOfDay(e.id,d).indexOf(other)>=0) s+=500;   // ทำเบรคครบ 2 พีค
+    } else { if(e.canSplit) s-=150; }                    // กันคนเบรคไว้ทำพีค
     var lm=learnMap[e.id]; if(lm){ s += (lm.slot[slot]||0) + (lm.day[d]||0); }
-    // carpool: จับคู่เดินทาง — เข้ากะ วัน+เวลา เดียวกัน
     if(e.cg){ var mateSame=false, mateOther=false;
-      E.forEach(function(o){ if(o.id===e.id||o.cg!==e.cg) return; if(!assignedG(o.id,d)) return;
-        var os=slotOf(o.id,d); if(os===slot) mateSame=true; else if(os) mateOther=true; });
+      E.forEach(function(o){ if(o.id===e.id||o.cg!==e.cg) return; var ms=slotsOfDay(o.id,d); if(!ms.length) return;
+        if(ms.indexOf(slot)>=0) mateSame=true; else mateOther=true; });
       if(mateSame) s += 900; else if(mateOther) s -= 400; }
     s += (hashN(e.id+'|'+bid+'|'+d+'|'+slot+'|'+seed)%100)*0.05;
     return s; };
   var pick=function(bid,d,slot,pos,loan){ var best=null,bs=-1e9; E.forEach(function(e){ if(!eligible(e,bid,d,slot,pos,loan))return;
     var s=score(e,bid,d,slot,pos,loan); if(s>bs){bs=s;best=e;} }); return best; };
 
-  // 1) PASS1 คนสาขาตัวเอง (เฉพาะวัน regen)
+  // 1) เติมคนสาขาตัวเอง (สมอก่อน แล้วพีค) · จัดทุกสาขาพร้อมกัน
   for(var d=0;d<7;d++){ if(!regenSet[d]) continue; (function(d){ branches.forEach(function(b){ var bid=b.id; var dm=demandOf(brPlan[bid]);
-    ['morning','night','mid'].forEach(function(slot){ POS.forEach(function(pos){ var g=0;
+    FILL_ORDER.forEach(function(slot){ POS.forEach(function(pos){ var g=0;
       while(cellPos(bid,d,slot,pos)<(dm[slot][pos]||0)&&g<20){ var c=pick(bid,d,slot,pos,false); if(!c)break; doAssign(bid,d,slot,c,pos,'home'); g++; } }); }); }); })(d); }
-  // 2) PASS2 ยืมข้ามสาขา (เฉพาะ min กะหลัก · วัน regen)
+  // 2) ยืมข้ามสาขา (เฉพาะกะสมอที่ยังขาด)
   var loaners={}; branches.forEach(function(b){ loaners[b.id]=[]; });
   for(var d2=0;d2<7;d2++){ if(!regenSet[d2]) continue; (function(d){ branches.forEach(function(b){ var bid=b.id; var dm=demandOf(brPlan[bid]);
     ['morning','night'].forEach(function(slot){ POS.forEach(function(pos){ var g=0;
       while(cellPos(bid,d,slot,pos)<(dm[slot][pos]||0)&&g<20){ var c=pick(bid,d,slot,pos,true); if(!c)break;
         doAssign(bid,d,slot,c,pos,'loan'); loaners[bid].push({name:c.name,from:brName[c.branchId],d:d,slot:slot,pos:pos}); g++; } }); }); }); })(d2); }
 
-  // reports
+  // ใครถูกจัดบ้าง (ข้ามสาขา) — ใช้เช็ค "จัดครบทุกคนไหม"
+  var scheduled={}; branches.forEach(function(b){ for(var d=0;d<7;d++) SLOTS.forEach(function(sl){ weeks[b.id][d][sl].forEach(function(a){ scheduled[a.id]=1; }); }); });
+
+  // reports ต่อสาขา
   var result={};
   branches.forEach(function(b){ var bid=b.id; var week=weeks[bid]; var dm=demandOf(brPlan[bid]);
     var bEmps=E.filter(function(e){return e.branchId===bid;});
-    var shortDays=[]; var coverShort=[];
-    for(var d=0;d<7;d++){ (function(d){ ['morning','night'].forEach(function(slot){ POS.forEach(function(pos){
-      var need=dm[slot][pos]||0; var got=cellPos(bid,d,slot,pos); if(got<need) coverShort.push({d:d,slot:slot,pos:pos,short:need-got}); }); }); })(d); }
+    var shortDays=[]; var coverShort=[]; var peakShort=[];
+    for(var d=0;d<7;d++){ (function(d){
+      ['morning','night'].forEach(function(slot){ POS.forEach(function(pos){
+        var need=dm[slot][pos]||0; var got=cellPos(bid,d,slot,pos); if(got<need) coverShort.push({d:d,slot:slot,pos:pos,short:need-got}); }); });
+      ['lunch','dinner'].forEach(function(slot){ var need=dm[slot].cook||0; var got=cellPos(bid,d,slot,'cook');
+        if(got<need) peakShort.push({d:d,slot:slot,pos:'cook',short:need-got}); });
+    })(d); }
     coverShort.forEach(function(c){ if(shortDays.indexOf(c.d)<0) shortDays.push(c.d); });
     var seen={}; var suggestions=[];
     coverShort.forEach(function(c){ E.forEach(function(e){
       if(e.branchId===bid) return; if(e.loanOk) return;
-      if(e.positions.indexOf(c.pos)<0) return; if(e.off.indexOf(c.d)>=0) return; if(assignedG(e.id,c.d)) return;
+      if(e.positions.indexOf(c.pos)<0) return; if(e.off.indexOf(c.d)>=0) return; if(slotsOfDay(e.id,c.d).length) return;
       var key=e.id+'|'+c.d; if(seen[key]) return; seen[key]=1;
       suggestions.push({empId:e.id,name:e.name,from:brName[e.branchId],d:c.d,slot:c.slot,pos:c.pos}); }); });
-    var noRest=bEmps.filter(function(e){return workCount(e.id)>=7;}).map(function(e){return e.name;});
-    var fair=bEmps.map(function(e){ var days=0,hours=0; for(var d=0;d<7;d++){ ['morning','mid','night'].forEach(function(s){
-      if(week[d][s].some(function(a){return a.id===e.id;})){ days++; hours+= s==='mid'?6:10; } }); } return {id:e.id,name:e.name,days:days,hours:hours}; });
+    var noRest=bEmps.filter(function(e){return workDays(e.id)>=7 && !e.canOt;}).map(function(e){return e.name;});
+    var unscheduled=bEmps.filter(function(e){return !scheduled[e.id];}).map(function(e){return {id:e.id,name:e.name}; });
+    var fair=bEmps.map(function(e){ var days=workDays(e.id), hours=gHours[e.id]||0; return {id:e.id,name:e.name,days:days,hours:hours}; });
     var offByDay={}; for(var d3=0;d3<7;d3++){ (function(d){ offByDay[d]=bEmps.filter(function(e){return e.off.indexOf(d)>=0;}).map(function(e){return e.name;}); })(d3); }
-    result[bid]={ week:week, coverShort:coverShort, shortDays:shortDays, noRest:noRest, fair:fair, loaners:loaners[bid], suggestions:suggestions, offByDay:offByDay };
+    result[bid]={ week:week, coverShort:coverShort, peakShort:peakShort, shortDays:shortDays, noRest:noRest,
+      unscheduled:unscheduled, fair:fair, loaners:loaners[bid], suggestions:suggestions, offByDay:offByDay };
   });
   return result;
 }
@@ -205,7 +242,7 @@ function load(){
   }).catch(function(e){ S.loading=false; document.getElementById('app').innerHTML='<div style="padding:40px;text-align:center;color:#C0392B;">โหลดไม่สำเร็จ<br><small>'+esc(e.message)+'</small></div>'; });
 }
 function planOf(bid){ var b=S.branches.find(function(x){return x.id===bid;}); return (b&&b.plan)||{cook_m:0,cook_mid:0,cook_n:0,plan_key:'lean'}; }
-function storedDaysSet(){ var s={}; Object.keys(S.grid||{}).forEach(function(bid){ var bd=S.grid[bid]||{}; Object.keys(bd).forEach(function(d){ var dd=bd[d]; if((dd.morning&&dd.morning.length)||(dd.mid&&dd.mid.length)||(dd.night&&dd.night.length)) s[+d]=1; }); }); return s; }
+function storedDaysSet(){ var s={}; Object.keys(S.grid||{}).forEach(function(bid){ var bd=S.grid[bid]||{}; Object.keys(bd).forEach(function(d){ var dd=bd[d]; if(SLOTS.some(function(sl){return dd[sl]&&dd[sl].length;})) s[+d]=1; }); }); return s; }
 function getSol(){ var stored=storedDaysSet(); var regen=[]; for(var d=0;d<7;d++) if(!stored[d]) regen.push(d);
   return solveAll(S, {storedGrid:S.grid||{}, regenDays:regen}); }
 function isGenerated(d){ return !!storedDaysSet()[d]; }
@@ -231,13 +268,13 @@ function runGenerate(){ var days=S.genDays.slice().sort(function(a,b){return a-b
   S.grid=S.grid||{};
   days.forEach(function(d){ S.branches.forEach(function(b){ S.grid[b.id]=S.grid[b.id]||{}; S.grid[b.id][d]=cloneDay(sol[b.id].week[d]); }); });
   S.genOpen=false;
-  saveGrid().then(function(){ toast('จัดตาราง '+days.length+' วันแล้ว'); }); render(); }
+  saveGrid().then(function(){ toast('จัดทุกสาขา '+days.length+' วันแล้ว'); }); render(); }
 function reshuffle(){ api('sched_seed_bump').then(function(seed){ S.seed=seed;
   var days=[]; var st=storedDaysSet(); for(var d=0;d<7;d++) if(st[d]) days.push(d); if(!days.length){ days=[0,1,2,3,4,5,6]; }
   var sol=solveAll(S,{storedGrid:{},regenDays:days});  // สุ่มใหม่ทั้งหมด (ไม่ยึดของเดิม ยกเว้นล็อก)
   // เก็บล็อกมือไว้
-  var locks={}; S.branches.forEach(function(b){ locks[b.id]={}; var bd=S.grid[b.id]||{}; Object.keys(bd).forEach(function(d){ locks[b.id][d]={morning:[],mid:[],night:[]};
-    ['morning','mid','night'].forEach(function(sl){ (bd[d][sl]||[]).forEach(function(a){ if(a.locked) locks[b.id][d][sl].push(a); }); }); }); });
+  var locks={}; S.branches.forEach(function(b){ locks[b.id]={}; var bd=S.grid[b.id]||{}; Object.keys(bd).forEach(function(d){ locks[b.id][d]={}; SLOTS.forEach(function(sl){ locks[b.id][d][sl]=[]; });
+    SLOTS.forEach(function(sl){ (bd[d][sl]||[]).forEach(function(a){ if(a.locked) locks[b.id][d][sl].push(a); }); }); }); });
   var sol2=solveAll(S,{storedGrid:locks,regenDays:days});
   days.forEach(function(d){ S.branches.forEach(function(b){ S.grid[b.id]=S.grid[b.id]||{}; S.grid[b.id][d]=cloneDay(sol2[b.id].week[d]); }); });
   saveGrid().then(function(){ toast('สุ่มจัดใหม่แล้ว'); }); render(); }); }
@@ -268,7 +305,7 @@ function addPerson(empId,learnKind){ var c=S.editCell; materializeDay(c.d);
   p.then(function(){ toast('เพิ่ม '+e.name+' แล้ว (ล็อกไว้)'); }); render(); }
 
 /* employee prefs */
-function addEmp(){ S.editEmp={id:null,branchId:S.activeBranch,name:'',positions:[],preferredSlots:[],off:[],loanOk:false}; S.mode='setup'; render(); }
+function addEmp(){ S.editEmp={id:null,branchId:S.activeBranch,name:'',positions:[],preferredSlots:[],off:[],loanOk:false,canOt:false,canSplit:false}; S.mode='setup'; render(); }
 function editEmp(id){ var e=empById(id); S.editEmp=Object.assign({},e,{positions:(e.positions||[]).slice(),preferredSlots:(e.preferredSlots||[]).slice(),off:(e.off||[]).slice()}); S.mode='setup'; render(); }
 function closeSheet(){ S.editEmp=null; render(); }
 function setName(v){ if(S.editEmp) S.editEmp.name=v; }
@@ -276,13 +313,21 @@ function toggleArr(field,val){ var a=(S.editEmp[field]||[]).slice(); var i=a.ind
 function pickDraftBranch(bid){ S.editEmp.branchId=bid; render(); }
 function toggleLoan(){ S.editEmp.loanOk=!S.editEmp.loanOk; render(); }
 function rpcEmpArgs(e,over){ var m=Object.assign({},e,over||{});
-  return { p_id:m.id, p_branch:m.branchId, p_name:m.name, p_positions:m.positions, p_slots:(m.preferredSlots||[]), p_off:m.off||[], p_loan:!!m.loanOk }; }
+  return { p_id:m.id, p_branch:m.branchId, p_name:m.name, p_positions:m.positions, p_slots:(m.preferredSlots||[]), p_off:m.off||[], p_loan:!!m.loanOk, p_ot:!!m.canOt, p_split:!!m.canSplit }; }
+function toggleOt(){ S.editEmp.canOt=!S.editEmp.canOt; render(); }
+function toggleSplit(){ S.editEmp.canSplit=!S.editEmp.canSplit; render(); }
+function capToggle(fn,on,icon,title,sub){
+  return '<button onclick="'+fn+'" style="width:100%;margin-top:9px;border:1.5px solid '+(on?'#C77A1B':'#EFD9CF')+';background:'+(on?'#FFF3E6':'#fff')+';border-radius:14px;padding:13px 14px;cursor:pointer;display:flex;align-items:center;gap:11px;text-align:left;">'+
+    '<span style="width:34px;height:34px;border-radius:10px;background:#FFF1D6;display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(icon,18,'#B5651D')+'</span>'+
+    '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13.5px;color:'+(on?'#C2510F':'#8A7E6E')+';">'+title+'</div><div style="font-size:10.5px;color:#9A8C7C;margin-top:1px;">'+sub+'</div></div>'+
+    '<span style="width:26px;height:26px;border-radius:8px;border:2px solid '+(on?'#C77A1B':'#EFD9CF')+';background:'+(on?'#FFF3E6':'#fff')+';display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+(on?svg(I_check,15,'#C2510F',3):'')+'</span></button>';
+}
 function enableLoan(empId,who){ var e=empById(empId); if(!e) return; api('sched_emp_save',rpcEmpArgs(e,{loanOk:true})).then(function(){ e.loanOk=true; toast('ให้ '+who+' มาช่วยแล้ว'); }); }
 function saveEmp(){ var d=S.editEmp; if(!d||!d.name||!d.name.trim()||!d.positions||!d.positions.length){ toast('ใส่ชื่อและตำแหน่งก่อน'); return; }
   d.name=d.name.trim();
   api('sched_emp_save',rpcEmpArgs(d)).then(function(newId){
     if(d.id){ var e=empById(d.id); if(e) Object.assign(e,{name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk}); }
-    else { S.employees.push({id:newId,name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk,commuteGroup:null}); }
+    else { S.employees.push({id:newId,name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk,canOt:!!d.canOt,canSplit:!!d.canSplit,commuteGroup:null}); }
     S.editEmp=null; toast('บันทึกแล้ว');
   }).catch(function(e){ toast('บันทึกไม่สำเร็จ'); }); }
 function deleteEmp(){ var id=S.editEmp.id; if(!id){ closeSheet(); return; }
@@ -342,6 +387,7 @@ function personCard(a,bid,d){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:
   if(loan){ var from=(S.branches.find(function(b){return b.id===a.homeBranch;})||{}).short||'';
     badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#C4571E;background:#FFE9D6;padding:2px 7px;border-radius:6px;margin-top:4px;margin-right:4px;">'+svg(I_arrow,10,'#C4571E',2)+'ช่วยจาก '+esc(from)+'</span>'; }
   if(cg){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#6A4CC0;background:#EDE8FB;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_car,10,'#6A4CC0',1.8)+'คู่รถ</span>'; }
+  if((window._splitToday||{})[a.id]>1){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_clock,10,'#B5651D',2)+'กะเบรค (2 พีค)</span>'; }
   if(badges) h+='<div>'+badges+'</div>';
   h+='</div>';
   h+='<span class="num" style="font-weight:700;font-size:12.5px;color:#3A4A55;background:#F1F5F8;padding:5px 10px;border-radius:9px;white-space:nowrap;flex:0 0 auto;">'+SLOTM[a.slot].time+'</span>';
@@ -367,8 +413,9 @@ function renderView(bid,branch,branchEmps,branchEmpty,dates,todayIdx,sd,sol){
 }
 
 function renderDay(bid,branch,dates,todayIdx,sd,sol){
-  var daySol=sol.week[sd]||{morning:[],mid:[],night:[]};
-  var dayCount=daySol.morning.length+daySol.night.length+daySol.mid.length;
+  var daySol=sol.week[sd]||{}; SLOTS.forEach(function(s){ if(!daySol[s]) daySol[s]=[]; });
+  var cnt={}; SLOTS.forEach(function(sl){ (daySol[sl]||[]).forEach(function(a){ cnt[a.id]=(cnt[a.id]||0)+1; }); }); window._splitToday=cnt;
+  var dayCount=SLOTS.reduce(function(t,s){ return t+daySol[s].length; },0);
   var editable=isGenerated(sd);
   var h='';
   h+='<div style="display:flex;gap:5px;margin-top:12px;">';
@@ -383,7 +430,7 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
   h+='<span style="font-size:13px;font-weight:600;background:rgba(255,255,255,.26);padding:4px 12px;border-radius:20px;">'+DOWF[sd]+' '+dates[sd].getDate()+'</span>';
   h+='<span style="font-size:11px;font-weight:700;background:#fff;color:#2D7DA6;padding:5px 12px;border-radius:20px;">'+(editable?'จัดแล้ว':'พรีวิว')+'</span></div>';
   h+='<div style="display:flex;align-items:baseline;gap:8px;margin-top:8px;"><span class="num" style="font-weight:800;font-size:26px;line-height:1;">'+dayCount+'</span><span style="font-size:14px;font-weight:600;">คนเข้างาน</span></div>';
-  h+='<div style="font-size:12.5px;opacity:.82;margin-top:3px;">กะเช้า '+daySol.morning.length+' คน · กะดึก '+daySol.night.length+' คน'+(daySol.mid.length?(' · กะกลาง '+daySol.mid.length+' คน'):'')+'</div></div>';
+  h+='<div style="font-size:12.5px;opacity:.82;margin-top:3px;">เช้า '+daySol.morning.length+' · ดึก '+daySol.night.length+((daySol.lunch.length||daySol.dinner.length)?(' · พีค '+(daySol.lunch.length+daySol.dinner.length)):'')+' คน</div></div>';
   var dShort=sol.coverShort.filter(function(c){return c.d===sd;});
   if(dShort.length){ var txt='วันนี้ขาด '+dShort.map(function(c){return POSM[c.pos].label+' '+SLOTM[c.slot].label;}).join(' · ');
     h+='<div style="display:flex;align-items:center;gap:8px;background:#FBE6DE;border-radius:13px;padding:10px 13px;margin-top:12px;">'+svg(I_alert,15,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">'+esc(txt)+'</span></div>'; }
@@ -397,12 +444,15 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
   }
   var offToday=(sol.offByDay&&sol.offByDay[sd])||[];
   if(offToday.length){ h+='<div style="display:flex;align-items:flex-start;gap:9px;background:#F4ECE0;border-radius:13px;padding:10px 13px;margin-top:11px;">'+svg(I_cal2,15,'#9A7A55',2)+'<span style="flex:1;font-size:11.5px;color:#7A6A57;line-height:1.5;"><span style="font-weight:700;">หยุดวันนี้:</span> '+esc(offToday.join(' · '))+'</span></div>'; }
-  ['morning','mid','night'].forEach(function(slot){
-    var list=daySol[slot]||[]; if(!list.length && slot==='mid') return;
+  SLOTS.forEach(function(slot){ var m=SLOTM[slot];
+    var list=daySol[slot]||[];
+    if(!list.length && m.peak && !editable) return;   // พีคว่างในโหมดดูอย่างเดียว = ซ่อน
     if(!list.length && !editable) return;
-    h+='<div style="display:flex;align-items:center;gap:9px;margin:14px 2px 8px;"><span style="width:9px;height:9px;border-radius:50%;background:'+SLOTM[slot].dot+';flex:0 0 auto;"></span><span style="font-weight:700;font-size:14px;">กะ'+SLOTM[slot].label+'</span><span style="font-size:12px;color:#5A7488;">'+SLOTM[slot].time+' · '+list.length+' คน</span></div>';
+    h+='<div style="display:flex;align-items:center;gap:9px;margin:14px 2px 8px;"><span style="width:9px;height:9px;border-radius:50%;background:'+m.dot+';flex:0 0 auto;"></span><span style="font-weight:700;font-size:14px;">'+m.label+'</span>'+
+      (m.peak?'<span style="font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:1px 7px;border-radius:6px;">ช่วงขายดี</span>':'')+
+      '<span style="font-size:12px;color:#5A7488;">'+m.time+' · '+list.length+' คน</span></div>';
     h+='<div style="display:flex;flex-direction:column;gap:8px;">'+list.map(function(a){ a.slot=slot; return personCard(a,bid,sd); }).join('');
-    if(editable) h+='<button onclick="openAddPerson(\''+bid+'\','+sd+',\''+slot+'\')" style="border:1.5px dashed #E2D3C0;background:#fff;border-radius:13px;padding:9px;cursor:pointer;font-weight:700;font-size:12px;color:#9A7A55;display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_plus,14,'#9A7A55',2.2)+'เพิ่มคนกะ'+SLOTM[slot].label+'</button>';
+    if(editable) h+='<button onclick="openAddPerson(\''+bid+'\','+sd+',\''+slot+'\')" style="border:1.5px dashed #E2D3C0;background:#fff;border-radius:13px;padding:9px;cursor:pointer;font-weight:700;font-size:12px;color:#9A7A55;display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_plus,14,'#9A7A55',2.2)+'เพิ่มคน'+m.label+'</button>';
     h+='</div>';
   });
   if(!editable){ h+='<div style="text-align:center;margin-top:16px;font-size:11.5px;color:#9A8C7C;">นี่คือพรีวิว — กด "จัดตารางอัตโนมัติ" ในแท็บตั้งค่าเพื่อจัดจริงและแก้ไขได้</div>'; }
@@ -413,9 +463,10 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
 function renderWeek(bid,branch,dates,todayIdx,sol){
   var h='<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">';
   for(var d=0;d<7;d++){ (function(d){
-    var dd=sol.week[d]||{morning:[],mid:[],night:[]};
+    var dd=sol.week[d]||{}; SLOTS.forEach(function(s){ if(!dd[s]) dd[s]=[]; });
     var gen=isGenerated(d); var isToday=d===todayIdx;
     var dShort=sol.coverShort.filter(function(c){return c.d===d;});
+    var peakN=dd.lunch.length+dd.dinner.length;
     h+='<div onclick="selDay('+d+');setViewMode(\'day\')" style="background:#fff;border-radius:14px;padding:10px 12px;cursor:pointer;box-shadow:0 8px 20px -20px rgba(26,26,46,.4);border:1px solid '+(isToday?'#F2B45A':'#F3EADD')+';">';
     h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">';
     h+='<span style="font-weight:700;font-size:13px;">'+DOWF[d]+' '+dates[d].getDate()+(isToday?' <span style="font-size:9.5px;color:#C77A1B;background:#FFF1D6;padding:1px 6px;border-radius:6px;">วันนี้</span>':'')+'</span>';
@@ -426,6 +477,7 @@ function renderWeek(bid,branch,dates,todayIdx,sol){
         '<span style="width:18px;height:18px;border-radius:5px;background:'+SLOTM[slot].dot+'22;display:flex;align-items:center;justify-content:center;flex:0 0 auto;margin-top:1px;"><span style="width:7px;height:7px;border-radius:50%;background:'+SLOTM[slot].dot+';"></span></span>'+
         '<div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;">'+(list.length?list.map(function(a){ a.slot=slot; return nameChipMini(a,bid,d,slot,false); }).join(''):'<span style="font-size:10.5px;color:#C0B4A2;padding-top:2px;">—</span>')+'</div></div>';
     });
+    if(peakN) h+='<div style="font-size:10px;color:#B5651D;margin-top:2px;padding-left:25px;">พีค: '+dd.lunch.length+' เที่ยง · '+dd.dinner.length+' เย็น</div>';
     h+='</div>';
   })(d); }
   h+='</div><div style="height:8px;"></div>';
@@ -456,7 +508,7 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
     h+='</div>';
     h+='<div style="display:flex;gap:8px;margin-top:11px;"><button onclick="genAll()" style="flex:0 0 auto;border:1.5px solid #EFD9CF;background:#fff;border-radius:11px;padding:10px 14px;cursor:pointer;font-weight:700;font-size:12.5px;color:#7A6A57;">ทั้งสัปดาห์</button>'+
       '<button onclick="runGenerate()" style="flex:1;border:none;border-radius:11px;background:#2C7A56;color:#fff;font-weight:700;font-size:13.5px;padding:10px;cursor:pointer;">จัด '+S.genDays.length+' วัน</button></div>';
-    h+='<div style="font-size:10.5px;color:#9A8C7C;margin-top:8px;line-height:1.4;">จัดแล้วแก้มือได้ในแท็บ "ดูตาราง" (แตะที่คน) · คนที่ล็อก '+svg(I_lock,9,'#9A8C7C',2)+' จะไม่ถูกย้ายเวลาจัดใหม่</div>';
+    h+='<div style="font-size:10.5px;color:#9A8C7C;margin-top:8px;line-height:1.5;">จัด <b>ทุกสาขาพร้อมกัน</b> (เพราะมีการย้ายคนไปช่วยข้ามสาขา) · จัดแล้วแก้มือได้ในแท็บ "ดูตาราง" (แตะที่คน) · คนที่ล็อก '+svg(I_lock,9,'#9A8C7C',2)+' จะไม่ถูกย้ายเวลาจัดใหม่</div>';
     h+='</div>';
   }
   h+='<button onclick="reshuffle()" style="width:100%;margin-top:8px;border:none;background:none;cursor:pointer;font-weight:700;font-size:12px;color:#C77A1B;text-decoration:underline;">สุ่มจัดใหม่ (สลับคน)</button>';
@@ -465,11 +517,18 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
   // banner ผล
   if(!branchEmpty){
     var restBad=sol.noRest.length>0, coverBad=sol.shortDays.length>0;
+    // เช็ค "จัดครบทุกคนไหม" — รวมทุกสาขา
+    var allSol=getSol(); var unsched=[];
+    S.branches.forEach(function(b){ (allSol[b.id].unscheduled||[]).forEach(function(u){ unsched.push(esc(u.name)+' ('+esc(b.short)+')'); }); });
     h+='<div style="margin-top:13px;display:flex;flex-direction:column;gap:8px;">';
-    if(!restBad) h+='<div style="display:flex;align-items:center;gap:8px;background:#DCEFE4;border-radius:13px;padding:10px 13px;">'+svg(I_check,15,'#2C7A56',2.2)+'<span style="font-size:11.5px;color:#235C40;font-weight:600;">ทุกคนได้หยุด ≥1 วัน · ไม่มีใครทำเกิน 6 วัน</span></div>';
-    else h+='<div style="display:flex;align-items:center;gap:8px;background:#FBE6DE;border-radius:13px;padding:10px 13px;">'+svg(I_alert,15,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">'+esc(sol.noRest.join(' · '))+' — ยังไม่ได้หยุด</span></div>';
-    if(coverBad){ var ct='คนไม่พอ '+sol.shortDays.length+' วัน — วัน'+sol.shortDays.slice().sort(function(a,b){return a-b;}).map(function(x){return DOW[x];}).join(',')+(sol.loaners.length?(' · ดึงสาขาอื่นช่วย '+sol.loaners.length+' กะ'):'');
+    if(!unsched.length) h+='<div style="display:flex;align-items:center;gap:8px;background:#DCEFE4;border-radius:13px;padding:10px 13px;">'+svg(I_check,15,'#2C7A56',2.2)+'<span style="font-size:11.5px;color:#235C40;font-weight:600;">จัดครบทุกคนแล้ว (ทุกสาขา) — ไม่มีใครตกหล่น</span></div>';
+    else h+='<div style="display:flex;align-items:flex-start;gap:8px;background:#FBE6DE;border-radius:13px;padding:10px 13px;">'+svg(I_alert,15,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">ยังไม่ได้จัด '+unsched.length+' คน: '+unsched.join(' · ')+'</span></div>';
+    if(!restBad) h+='<div style="display:flex;align-items:center;gap:8px;background:#DCEFE4;border-radius:13px;padding:10px 13px;">'+svg(I_check,15,'#2C7A56',2.2)+'<span style="font-size:11.5px;color:#235C40;font-weight:600;">ทุกคนได้หยุด ≥1 วัน (OT ทำได้ถึง 7 วัน)</span></div>';
+    else h+='<div style="display:flex;align-items:center;gap:8px;background:#FBE6DE;border-radius:13px;padding:10px 13px;">'+svg(I_alert,15,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">'+esc(sol.noRest.join(' · '))+' — ทำงานหนักไป (ยังไม่ได้หยุด)</span></div>';
+    if(coverBad){ var ct='กะหลักคนไม่พอ '+sol.shortDays.length+' วัน — วัน'+sol.shortDays.slice().sort(function(a,b){return a-b;}).map(function(x){return DOW[x];}).join(',')+(sol.loaners.length?(' · ดึงสาขาอื่นช่วย '+sol.loaners.length+' กะ'):'');
       h+='<div style="display:flex;align-items:center;gap:8px;background:#FFF1D6;border-radius:13px;padding:10px 13px;">'+svg(I_info,15,'#A06A12',2)+'<span style="font-size:11.5px;color:#8A5A12;font-weight:600;">'+esc(ct)+'</span></div>'; }
+    if(sol.peakShort&&sol.peakShort.length){ var pd={}; sol.peakShort.forEach(function(c){ pd[c.d]=1; });
+      h+='<div style="display:flex;align-items:center;gap:8px;background:#FFF1D6;border-radius:13px;padding:10px 13px;">'+svg(I_clock,15,'#B5651D',2)+'<span style="font-size:11.5px;color:#8A5A12;font-weight:600;">ช่วงพีคคนไม่พอ '+Object.keys(pd).length+' วัน — เพิ่มคน OT/เบรค หรือลดแผน</span></div>'; }
     h+='</div>';
   }
   // learnings สรุป
@@ -502,13 +561,15 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
   h+='<div style="display:flex;flex-direction:column;gap:10px;">';
   branchEmps.forEach(function(e){ var primary=(e.positions&&e.positions[0])||'cook'; var m=POSM[primary]||POSM.cook;
     var posText=(e.positions||[]).map(function(p){return POSM[p]?POSM[p].label:p;}).join(' · ')||'ยังไม่ระบุตำแหน่ง';
-    var slotText=((e.preferredSlots&&e.preferredSlots.length)?e.preferredSlots:['morning','mid','late']).map(function(s){return SLOTM[SLOT_DB2ENG[s]||s].label;}).join('/');
+    var slotText=((e.preferredSlots&&e.preferredSlots.length)?e.preferredSlots:['morning','mid','late']).map(function(s){return (PREFM[s]||{label:s}).label;}).join('/');
     var offText=(e.off&&e.off.length)?e.off.slice().sort(function(a,b){return a-b;}).map(function(d){return DOW[d];}).join(','):'—';
     h+='<div onclick="editEmp(\''+e.id+'\')" style="background:#fff;border-radius:16px;padding:13px 15px;cursor:pointer;box-shadow:0 10px 24px -22px rgba(26,26,46,.5);border:1px solid #F3EADD;">'+
       '<div style="display:flex;align-items:center;gap:11px;"><span style="width:38px;height:38px;border-radius:12px;background:'+m.bg+';display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(I_person,20,m.color)+'</span>'+
       '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">'+esc(e.name)+
         (e.loanOk?' <span style="font-size:9.5px;color:#6A4CC0;background:#EDE8FB;padding:1px 6px;border-radius:5px;font-weight:700;">ช่วยสาขาอื่น</span>':'')+
         (e.commuteGroup?' <span style="font-size:9.5px;color:#6A4CC0;background:#EDE8FB;padding:1px 6px;border-radius:5px;font-weight:700;display:inline-flex;align-items:center;gap:2px;">'+svg(I_car,10,'#6A4CC0',1.8)+'คู่รถ</span>':'')+
+        (e.canOt?' <span style="font-size:9.5px;color:#B5651D;background:#FFF1D6;padding:1px 6px;border-radius:5px;font-weight:700;">OT</span>':'')+
+        (e.canSplit?' <span style="font-size:9.5px;color:#B5651D;background:#FFF1D6;padding:1px 6px;border-radius:5px;font-weight:700;">เบรค</span>':'')+
         '</div><div style="font-size:11px;color:#9A8C7C;margin-top:1px;">'+esc(posText)+'</div></div>'+
       svg(I_chev,16,'#C7BEB0',2.2)+'</div>'+
       '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">'+
@@ -539,10 +600,10 @@ function renderCellSheet(){
     return sheetWrap(h);
   }
   // add
-  var taken={}; ['morning','mid','night'].forEach(function(sl){ ((S.grid[c.bid]&&S.grid[c.bid][c.d]&&S.grid[c.bid][c.d][sl])||[]).forEach(function(a){ taken[a.id]=1; }); });
-  // ถ้ายังไม่ materialize ให้ดูจาก getSol
-  if(!isGenerated(c.d)){ var sol=getSol(); ['morning','mid','night'].forEach(function(sl){ (sol[c.bid].week[c.d][sl]||[]).forEach(function(a){ taken[a.id]=1; }); }); }
-  var cands=S.employees.filter(function(e){ return (e.branchId===c.bid || e.loanOk) && !taken[e.id] && (e.off||[]).indexOf(c.d)<0; });
+  // คนที่ถูกจัดในกะนี้แล้ว (กันซ้ำในกะเดียว) — คนที่อยู่กะอื่นวันเดียวกันเพิ่มได้ถ้าเป็น OT/เบรค
+  var inSlot={}; ((S.grid[c.bid]&&S.grid[c.bid][c.d]&&S.grid[c.bid][c.d][c.slot])||[]).forEach(function(a){ inSlot[a.id]=1; });
+  if(!isGenerated(c.d)){ var sol=getSol(); (sol[c.bid].week[c.d][c.slot]||[]).forEach(function(a){ inSlot[a.id]=1; }); }
+  var cands=S.employees.filter(function(e){ return (e.branchId===c.bid || e.loanOk) && !inSlot[e.id] && (e.off||[]).indexOf(c.d)<0; });
   var h='<div style="font-weight:700;font-size:18px;">เพิ่มคน · กะ'+SLOTM[c.slot].label+' '+DOWF[c.d]+'</div>';
   h+='<div style="font-size:12px;color:#9A8C7C;margin-top:3px;">คนที่ว่างวันนี้ (แตะเพื่อเพิ่ม · ล็อกอัตโนมัติ)</div>';
   h+='<div style="display:flex;flex-direction:column;gap:7px;margin-top:12px;">';
@@ -573,7 +634,7 @@ function renderSheet(){
   h+='</div>';
   h+='<label style="display:block;font-size:12px;font-weight:700;color:#7A6A57;margin:16px 2px 7px;">กะที่สะดวก</label>';
   h+='<div style="display:flex;gap:7px;">';
-  [['morning','morning'],['mid','mid'],['night','late']].forEach(function(pair){ var eng=pair[0], db=pair[1]; var on=d.preferredSlots.indexOf(db)>=0; var m=SLOTM[eng];
+  ['morning','mid','late'].forEach(function(db){ var on=d.preferredSlots.indexOf(db)>=0; var m=PREFM[db];
     h+='<button onclick="toggleArr(\'preferredSlots\',\''+db+'\')" style="flex:1;border:1.5px solid '+(on?'#C77A1B':'#EFD9CF')+';background:'+(on?'#FFF3E6':'#fff')+';color:'+(on?'#C2510F':'#8A7E6E')+';border-radius:13px;padding:11px 4px;cursor:pointer;font-weight:700;font-size:12.5px;display:flex;align-items:center;justify-content:center;gap:5px;"><span style="width:7px;height:7px;border-radius:50%;background:'+m.dot+';"></span>'+m.label+'</button>'; });
   h+='</div>';
   h+='<label style="display:block;font-size:12px;font-weight:700;color:#7A6A57;margin:16px 2px 7px;">วันหยุดประจำ</label>';
@@ -591,6 +652,8 @@ function renderSheet(){
     '<span style="width:34px;height:34px;border-radius:10px;background:#EDE8FB;display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(I_arrow,18,'#6A4CC0')+'</span>'+
     '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13.5px;color:'+(lon?'#C2510F':'#8A7E6E')+';">รับไปช่วยสาขาอื่นได้</div><div style="font-size:10.5px;color:#9A8C7C;margin-top:1px;">ระบบจะดึงไปช่วยสาขาที่คนไม่พอ</div></div>'+
     '<span style="width:26px;height:26px;border-radius:8px;border:2px solid '+(lon?'#C77A1B':'#EFD9CF')+';background:'+(lon?'#FFF3E6':'#fff')+';display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+(lon?svg(I_check,15,'#C2510F',3):'')+'</span></button>';
+  h+=capToggle('toggleOt()', !!d.canOt, I_clock, 'ทำเกินเวลา (OT) ได้', 'ยืดเวลา/ทำ 7 วัน/รับกะพีคเสริมได้');
+  h+=capToggle('toggleSplit()', !!d.canSplit, I_refresh, 'ทำกะเบรคได้', 'ทำพีคเที่ยง + พีคเย็น วันเดียว (พักช่วงบ่าย)');
   h+='<button onclick="saveEmp()" style="width:100%;margin-top:20px;border:none;border-radius:16px;background:'+(canSave?'#FF7E1D':'#F0E2D2')+';color:'+(canSave?'#1A1A2E':'#C0B4A2')+';font-weight:700;font-size:15px;padding:15px;cursor:'+(canSave?'pointer':'not-allowed')+';">บันทึก</button>';
   h+='<button onclick="closeSheet()" style="width:100%;margin-top:9px;border:none;background:none;padding:8px;cursor:pointer;font-weight:600;font-size:12.5px;color:#9A8C7C;">ยกเลิก</button><div style="height:6px;"></div>';
   h+='</div></div>';
