@@ -52,11 +52,14 @@ var SLOT_DB2ENG={morning:'morning',mid:'mid',late:'night'};
 var PREFM={morning:{label:'เช้า',dot:'#F2B45A'}, mid:{label:'กลางวัน',dot:'#E5A93D'}, late:{label:'ดึก',dot:'#3E8FC4'}};
 // แผนภาษาร้าน: ตัวเลข = จำนวนคนต่อกะ (เช้า-พีค-ดึก) · กะสมอ min 3 คน (กุ๊ก1 ผช1 แคช1) ส่วนเกินเป็นกุ๊ก
 var PLANS=[
-  {key:'p22',label:'2-2 ประหยัด',desc:'เช้า 3 · ดึก 3 (ขั้นต่ำ)',m:0,mid:0,n:0},
-  {key:'p313',label:'3-1-3',desc:'เช้า 3 · กะกลางคุมพีค 1 · ดึก 3',m:0,mid:1,n:0},
-  {key:'p314',label:'3-1-4',desc:'เช้า 3 · กะกลางคุมพีค 1 · ดึก 4',m:0,mid:1,n:1},
-  {key:'p44',label:'4-4',desc:'เช้า 4 · ดึก 4 (ไม่มีกะกลาง)',m:1,mid:0,n:1}
+  {key:'p22',label:'3-3 เบา',short:'3-3',desc:'เช้า 3 · ดึก 3 (ขั้นต่ำ วันเบา)',m:0,mid:0,n:0},
+  {key:'p313',label:'3-1-3',short:'3-1-3',desc:'เช้า 3 · กะกลางคุมพีค 1 · ดึก 3',m:0,mid:1,n:0},
+  {key:'p314',label:'3-1-4',short:'3-1-4',desc:'เช้า 3 · กะกลาง 1 · ดึก 4 (วันแรงสุด)',m:0,mid:1,n:1},
+  {key:'p34',label:'3-4 ดึกแน่น',short:'3-4',desc:'เช้า 3 · ดึก 4 (เย็น-ดึกขายดี เที่ยงเบา)',m:0,mid:0,n:1},
+  {key:'p43',label:'4-3 เช้าแน่น',short:'4-3',desc:'เช้า 4 · ดึก 3 (เช้าขายดี เย็นเบา)',m:1,mid:0,n:0},
+  {key:'p44',label:'4-4',short:'4-4',desc:'เช้า 4 · ดึก 4 (ไม่มีกะกลาง)',m:1,mid:0,n:1}
 ];
+var PLAN_BY_KEY={}; PLANS.forEach(function(p){ PLAN_BY_KEY[p.key]=p; });
 // demand: สมอ = min 3 คน + กุ๊กเสริม · "พีค" = กะกลาง 10-20 เต็ม 10 ชม. (คุมทั้งพีคเที่ยง+เย็น)
 // หรือแทนด้วยคู่เบรค เที่ยง+เย็น (เฉพาะคน can_split — ถูกกว่า: จ่าย 8 ชม.)
 // PEAK_DAYS จากยอดขายจริง "แยกสาขา" 30 วัน (เฉลี่ย/วัน): ทุกสาขาเรียงเหมือนกัน — จ แรงสุด, พ+ศ เบาสุด
@@ -67,7 +70,9 @@ var PLANS=[
 // พีคชั่วโมง: 10-12 หลัก + 17-20 รอง เหมือนกันทุกวัน → กะกลาง 10-20 ครอบพอดี
 var PEAK_DAYS={0:1,1:1,3:1,5:1,6:1};
 function demandOf(plan,d){ plan=plan||{}; var m=plan.cook_m||0, n=plan.cook_n||0, peak=plan.cook_mid||0;
-  if(d!==undefined && !PEAK_DAYS[d]) peak=0;
+  var dp = (d!==undefined) && plan.dayPlans && plan.dayPlans[d]!==undefined ? PLAN_BY_KEY[plan.dayPlans[d]] : null;
+  if(dp){ m=dp.m; peak=dp.mid; n=dp.n; }                 // แผนรายวัน (เลือกเอง/จากยอดขาย) ชนะแผนหลัก
+  else if(d!==undefined && !PEAK_DAYS[d]) peak=0;        // แผนหลัก: เว้นพีควันเบาอัตโนมัติ
   return {morning:{cook:1+m,kasst:1,cash:1},
           mid:{cook:peak,kasst:0,cash:0},
           lunch:{cook:0,kasst:0,cash:0},
@@ -291,13 +296,14 @@ function solveAll(state, opts){
 
   // reports ต่อสาขา
   var result={};
-  branches.forEach(function(b){ var bid=b.id; var week=weeks[bid]; var dm=demandOf(brPlan[bid]);
+  branches.forEach(function(b){ var bid=b.id; var week=weeks[bid];
     var bEmps=E.filter(function(e){return e.branchId===bid;});
     var shortDays=[]; var coverShort=[]; var peakShort=[];
     for(var d=0;d<7;d++){ (function(d){
+      var dm=demandOf(brPlan[bid],d);   // แผนรายวัน — เช้า/ดึกต่างกันได้ต่อวัน
       ['morning','night'].forEach(function(slot){ POS.forEach(function(pos){
         var need=dm[slot][pos]||0; var got=cellPos(bid,d,slot,pos); if(got<need) coverShort.push({d:d,slot:slot,pos:pos,short:need-got}); }); });
-      var needMid=demandOf(brPlan[bid],d).mid.cook||0; var gotMid=midCovered(bid,d);
+      var needMid=dm.mid.cook||0; var gotMid=midCovered(bid,d);
       if(gotMid<needMid) peakShort.push({d:d,slot:'mid',pos:'cook',short:needMid-gotMid});
     })(d); }
     coverShort.forEach(function(c){ if(shortDays.indexOf(c.d)<0) shortDays.push(c.d); });
@@ -359,8 +365,17 @@ function navWeek(n){ var o=(S.weekOffset||0)+n; if(o<0||o>3) return; S.weekOffse
 
 function setPlan(bid,key){ var p=PLANS.find(function(x){return x.key===key;});
   api('sched_set_plan',{p_branch:bid,p_key:p.key,p_m:p.m,p_mid:p.mid,p_n:p.n}).then(function(){
-    var b=S.branches.find(function(x){return x.id===bid;}); if(b) b.plan={cook_m:p.m,cook_mid:p.mid,cook_n:p.n,plan_key:p.key};
-    toast('เปลี่ยนแผนเป็น "'+p.label+'" แล้ว'); }); }
+    var b=S.branches.find(function(x){return x.id===bid;}); if(b) b.plan=Object.assign({},b.plan,{cook_m:p.m,cook_mid:p.mid,cook_n:p.n,plan_key:p.key});
+    toast('เปลี่ยนแผนหลักเป็น "'+p.label+'" แล้ว'); render(); }); }
+// แผนรายวัน: แตะวนตัวเลือก — หลัก(อัตโนมัติ) → 3-3 → 3-1-3 → 3-1-4 → 3-4 → 4-3 → 4-4 → หลัก
+function cycleDayPlan(bid,d){ var b=S.branches.find(function(x){return x.id===bid;}); if(!b) return;
+  var dp=(b.plan&&b.plan.dayPlans)||{}; var cur=dp[d];
+  var order=[null,'p22','p313','p314','p34','p43','p44'];
+  var next=order[(order.indexOf(cur===undefined?null:cur)+1)%order.length];
+  api('sched_set_day_plan',{p_branch:bid,p_day:d,p_key:next}).then(function(){
+    b.plan=b.plan||{}; b.plan.dayPlans=Object.assign({},b.plan.dayPlans);
+    if(next===null) delete b.plan.dayPlans[d]; else b.plan.dayPlans[d]=next;
+    render(); }); }
 
 function toggleGen(){ S.genOpen=!S.genOpen; render(); }
 function toggleGenDay(d){ var i=S.genDays.indexOf(d); if(i>=0)S.genDays.splice(i,1); else S.genDays.push(d); render(); }
@@ -591,12 +606,13 @@ function renderWeek(bid,branch,dates,todayIdx,sol){
     h+='<span style="font-weight:700;font-size:13px;">'+DOWF[d]+' '+dates[d].getDate()+(isToday?' <span style="font-size:9.5px;color:#C77A1B;background:#FFF1D6;padding:1px 6px;border-radius:6px;">วันนี้</span>':'')+'</span>';
     h+='<span style="font-size:10.5px;font-weight:700;color:'+(gen?'#2C7A56':'#9A8C7C')+';">'+(gen?'จัดแล้ว':'พรีวิว')+(dShort.length?(' · <span style="color:#C0392B;">ขาด '+dShort.length+'</span>'):'')+'</span>';
     h+='</div>';
-    // แถวกะ: เช้า/ดึก โชว์เสมอ · กะกลาง+คู่เบรค (คนเสริมพีคที่ไม่ได้เข้ากะปกติ) โชว์เมื่อมีคน
-    SLOTS.forEach(function(slot){ var list=dd[slot]||[];
+    // แถวกะ: เช้า/ดึก โชว์เสมอ · กะกลาง+คู่เบรคโชว์เมื่อมีคน · มีเวลากำกับทุกแถว (ลดความเข้าใจผิด)
+    SLOTS.forEach(function(slot){ var list=dd[slot]||[]; var m=SLOTM[slot];
       if(!list.length && slot!=='morning' && slot!=='night') return;
       h+='<div style="display:flex;align-items:flex-start;gap:7px;padding:3px 0;">'+
-        '<span title="'+SLOTM[slot].label+'" style="width:18px;height:18px;border-radius:5px;background:'+SLOTM[slot].dot+'22;display:flex;align-items:center;justify-content:center;flex:0 0 auto;margin-top:1px;"><span style="width:7px;height:7px;border-radius:50%;background:'+SLOTM[slot].dot+';"></span></span>'+
-        (SLOTM[slot].peak?'<span style="font-size:9px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 6px;border-radius:6px;flex:0 0 auto;margin-top:2px;">'+(slot==='mid'?'กลาง':SLOTM[slot].label.replace('พีค',''))+'</span>':'')+
+        '<span style="display:flex;align-items:center;gap:4px;flex:0 0 74px;margin-top:2px;">'+
+          '<span style="width:7px;height:7px;border-radius:50%;background:'+m.dot+';flex:0 0 auto;"></span>'+
+          '<span class="num" style="font-size:9.5px;font-weight:700;color:'+(m.peak?'#B5651D':'#7A6A57')+';white-space:nowrap;">'+m.time.replace('–','-')+'</span></span>'+
         '<div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;">'+(list.length?list.map(function(a){ a.slot=slot; return nameChipMini(a,bid,d,slot,false); }).join(''):'<span style="font-size:10.5px;color:#C0B4A2;padding-top:2px;">—</span>')+'</div></div>';
     });
     h+='</div>';
@@ -614,6 +630,15 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
   PLANS.forEach(function(p){ var on=pk===p.key;
     h+='<button onclick="setPlan(\''+bid+'\',\''+p.key+'\')" style="text-align:left;border:1.5px solid '+(on?'#FF7E1D':'#EFD9CF')+';background:'+(on?'#FFF3E6':'#fff')+';border-radius:14px;padding:11px 12px;cursor:pointer;">'+
       '<div style="font-weight:700;font-size:13.5px;color:'+(on?'#C2510F':'#1A1A2E')+';">'+p.label+'</div><div style="font-size:10.5px;color:#9A8C7C;margin-top:2px;">'+p.desc+'</div></button>'; });
+  h+='</div>';
+  // แผนรายวัน (ละเอียดตามยอดขายจริง) — แตะวันเพื่อวนแผน · วันที่ไม่ตั้ง = ใช้แผนหลัก
+  var dps=(plan.dayPlans)||{};
+  h+='<div style="font-size:12px;font-weight:700;color:#7A6A57;margin:12px 2px 7px;">แผนรายวัน <span style="font-weight:600;color:#B0A090;">(แตะเพื่อเปลี่ยน · ตั้งจากยอดขายจริงให้แล้ว)</span></div>';
+  h+='<div style="display:flex;gap:4px;">';
+  DOW.forEach(function(dw,d){ var k=dps[d]; var custom=k!==undefined; var P=custom?PLAN_BY_KEY[k]:null;
+    h+='<button onclick="cycleDayPlan(\''+bid+'\','+d+')" style="flex:1;min-width:0;border:1.5px solid '+(custom?'#C77A1B':'#EFD9CF')+';background:'+(custom?'#FFF3E6':'#fff')+';border-radius:10px;padding:7px 0;cursor:pointer;">'+
+      '<div style="font-size:10px;font-weight:700;color:'+(custom?'#C2510F':'#8A7E6E')+';">'+dw+'</div>'+
+      '<div class="num" style="font-size:9.5px;font-weight:700;margin-top:2px;color:'+(custom?'#C2510F':'#B0A090')+';">'+(P?P.short:'หลัก')+'</div></button>'; });
   h+='</div></div>';
 
   // จัดตารางอัตโนมัติ (เลือกช่วงวัน)
