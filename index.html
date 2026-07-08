@@ -28,9 +28,17 @@
 "use strict";
 var SUPA='https://mbposllztajrwjjnfyvg.supabase.co';
 var KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1icG9zbGx6dGFqcndqam5meXZnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkwOTE2MzYsImV4cCI6MjA5NDY2NzYzNn0.BF54zBwO2FaxN6ljANM7__Zsdi4jVFTQaEHvnfhAvDU';
-function api(fn,args){ return fetch(SUPA+'/rest/v1/rpc/'+fn,{method:'POST',
+// รหัสเจ้าของ: ลิงก์แชร์ให้พนักงานดูได้อย่างเดียว — ทุก RPC ที่แก้ข้อมูลต้องมี PIN (บังคับฝั่ง DB ด้วย)
+var MUT_RPC={sched_emp_save:1,sched_emp_delete:1,sched_seed_bump:1,sched_set_plan:1,sched_set_day_plan:1,sched_grid_save:1,sched_learn:1};
+function getPin(){ try{ return localStorage.getItem('schedPin')||''; }catch(e){ return ''; } }
+function setPin(v){ try{ if(v) localStorage.setItem('schedPin',v); else localStorage.removeItem('schedPin'); }catch(e){} }
+function api(fn,args){ args=args||{};
+  if(MUT_RPC[fn]) args=Object.assign({},args,{p_pin:getPin()});
+  return fetch(SUPA+'/rest/v1/rpc/'+fn,{method:'POST',
   headers:{apikey:KEY,Authorization:'Bearer '+KEY,'Content-Type':'application/json'},
-  body:JSON.stringify(args||{})}).then(function(r){ if(!r.ok) return r.text().then(function(t){throw new Error(t);});
+  body:JSON.stringify(args)}).then(function(r){ if(!r.ok) return r.text().then(function(t){
+    if(t.indexOf('PIN')>=0){ setPin(''); toast('รหัสไม่ถูกต้อง — ปลดล็อกใหม่ในแท็บตั้งค่า'); }
+    throw new Error(t);});
   return r.status===204?null:r.json(); }); }
 
 /* ===== meta ===== */
@@ -468,7 +476,14 @@ function saveGrid(){ return api('sched_grid_save',{p_week:weekStartIso(), p_grid
 
 /* ===== ACTIONS ===== */
 function goView(){ S.mode='view'; render(); }
-function goSetup(){ S.mode='setup'; render(); }
+function goSetup(){ if(!getPin()){ S.pinAsk=true; render(); return; } S.mode='setup'; render(); }
+function submitPin(){ var v=(document.getElementById('pin-input')||{}).value||'';
+  if(!v){ toast('ใส่รหัสก่อน'); return; }
+  api('sched_check_pin',{p_pin:v}).then(function(ok){
+    if(ok){ setPin(v); S.pinAsk=false; S.mode='setup'; toast('ปลดล็อกแล้ว'); render(); }
+    else toast('รหัสไม่ถูกต้อง'); }).catch(function(){ toast('เช็ครหัสไม่สำเร็จ'); }); }
+function closePin(){ S.pinAsk=false; render(); }
+function lockApp(){ setPin(''); S.mode='view'; toast('ล็อกแล้ว — ดูอย่างเดียว'); render(); }
 function setViewMode(m){ S.viewMode=m; render(); }
 function pickBranch(bid){ S.activeBranch=bid; S.selDay=null; S.editEmp=null; S.editCell=null; render(); }
 function selDay(d){ S.selDay=d; render(); }
@@ -512,8 +527,8 @@ function materializeDay(d){ if(isGenerated(d)) return; var sol=getSol(); S.grid=
   S.branches.forEach(function(b){ S.grid[b.id]=S.grid[b.id]||{}; S.grid[b.id][d]=cloneDay(sol[b.id].week[d]); }); }
 
 // เปิด sheet แก้ไข cell (คนที่ถูกจัด)
-function openEditPerson(bid,d,slot,empId){ S.editCell={type:'person',bid:bid,d:d,slot:slot,empId:empId}; render(); }
-function openAddPerson(bid,d,slot){ S.editCell={type:'add',bid:bid,d:d,slot:slot}; render(); }
+function openEditPerson(bid,d,slot,empId){ if(!getPin()){ toast('ดูอย่างเดียว — แก้ไขต้องปลดล็อกที่แท็บตั้งค่า'); return; } S.editCell={type:'person',bid:bid,d:d,slot:slot,empId:empId}; render(); }
+function openAddPerson(bid,d,slot){ if(!getPin()){ toast('ดูอย่างเดียว — แก้ไขต้องปลดล็อกที่แท็บตั้งค่า'); return; } S.editCell={type:'add',bid:bid,d:d,slot:slot}; render(); }
 function closeCell(){ S.editCell=null; render(); }
 function removePerson(reason,learnKind,delta){ var c=S.editCell; materializeDay(c.d);
   var e=empById(c.empId);
@@ -592,7 +607,7 @@ function render(){
   h+='<div style="display:flex;align-items:center;justify-content:space-between;">';
   h+='<div style="font-weight:700;letter-spacing:-.4px;font-size:22px;color:#3E8FC4;">ตารางกะ</div>';
   h+='<div style="display:flex;gap:4px;background:#F1E7D8;padding:3px;border-radius:11px;">';
-  h+=tabBtn('ดูตาราง',isView,'goView()'); h+=tabBtn('ตั้งค่า',!isView,'goSetup()');
+  h+=tabBtn('ดูตาราง',isView,'goView()'); h+=tabBtn((getPin()?'ตั้งค่า':'ตั้งค่า '+svg(I_lock,10,'currentColor',2.2)),!isView,'goSetup()');
   h+='</div></div>';
   h+='<div class="scr" style="display:flex;gap:6px;margin-top:11px;overflow-x:auto;">';
   S.branches.forEach(function(b){ var on=b.id===bid;
@@ -612,6 +627,17 @@ function render(){
 
   if(S.editEmp) h+=renderSheet();
   if(S.editCell) h+=renderCellSheet();
+  if(S.pinAsk){
+    h+='<div onclick="closePin()" style="position:fixed;inset:0;max-width:440px;margin:0 auto;z-index:75;background:rgba(26,26,46,.45);display:flex;flex-direction:column;justify-content:flex-end;animation:fade .2s ease;">';
+    h+='<div onclick="event.stopPropagation()" style="background:#FFF6EC;border-radius:30px 30px 0 0;padding:10px 20px calc(24px + env(safe-area-inset-bottom));animation:rise .26s cubic-bezier(.2,.9,.3,1);">';
+    h+='<div style="width:42px;height:5px;border-radius:3px;background:#E2D3C0;margin:6px auto 15px;"></div>';
+    h+='<div style="display:flex;align-items:center;gap:9px;"><span style="width:38px;height:38px;border-radius:12px;background:#FFF1D6;display:flex;align-items:center;justify-content:center;">'+svg(I_lock,19,'#B5651D',2)+'</span>';
+    h+='<div><div style="font-weight:700;font-size:16px;">สำหรับเจ้าของร้าน</div><div style="font-size:11.5px;color:#9A8C7C;">ใส่รหัสเพื่อแก้ตาราง/ตั้งค่า — พนักงานดูตารางได้เลยไม่ต้องใส่</div></div></div>';
+    h+='<input id="pin-input" type="password" inputmode="numeric" placeholder="รหัสเจ้าของ" onkeydown="if(event.key===\'Enter\')submitPin()" style="width:100%;margin-top:14px;border:1.5px solid #EFD9CF;background:#fff;border-radius:13px;padding:13px 14px;font-family:\'Anuphan\',sans-serif;font-size:18px;letter-spacing:4px;text-align:center;color:#1A1A2E;">';
+    h+='<button onclick="submitPin()" style="width:100%;margin-top:12px;border:none;border-radius:14px;background:#FF7E1D;color:#1A1A2E;font-weight:700;font-size:14.5px;padding:14px;cursor:pointer;">ปลดล็อก</button>';
+    h+='<button onclick="closePin()" style="width:100%;margin-top:8px;border:none;background:none;padding:8px;cursor:pointer;font-weight:600;font-size:12.5px;color:#9A8C7C;">ยกเลิก</button>';
+    h+='</div></div>';
+  }
   if(S.toast) h+='<div style="position:fixed;left:50%;transform:translateX(-50%);max-width:400px;width:calc(100% - 40px);bottom:22px;z-index:80;background:#1A1A2E;color:#fff;border-radius:14px;padding:13px 16px;font-size:13px;font-weight:600;text-align:center;animation:rise .24s ease;box-shadow:0 18px 40px -18px rgba(0,0,0,.6);">'+esc(S.toast)+'</div>';
   app.innerHTML=h;
 }
@@ -668,7 +694,7 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
   var daySol=sol.week[sd]||{}; SLOTS.forEach(function(s){ if(!daySol[s]) daySol[s]=[]; });
   var cnt={}; SLOTS.forEach(function(sl){ (daySol[sl]||[]).forEach(function(a){ cnt[a.id]=(cnt[a.id]||0)+1; }); }); window._splitToday=cnt;
   var dayCount=SLOTS.reduce(function(t,s){ return t+daySol[s].length; },0);
-  var editable=isGenerated(sd);
+  var editable=isGenerated(sd)&&!!getPin();   // ล็อก: คนทั่วไปดูอย่างเดียว
   var h='';
   h+='<div style="display:flex;gap:5px;margin-top:12px;">';
   DOW.forEach(function(dw,d){ var isSel=d===sd; var isToday=d===todayIdx; var gen=isGenerated(d);
@@ -687,7 +713,7 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
   var dShort=sol.coverShort.concat(sol.peakShort).filter(function(c){return c.d===sd;});
   if(dShort.length){ var txt='วันนี้ขาด '+dShort.map(function(c){return POSM[c.pos].label+' '+SLOTM[c.slot].label;}).join(' · ');
     h+='<div style="display:flex;align-items:center;gap:8px;background:#FBE6DE;border-radius:13px;padding:10px 13px;margin-top:12px;">'+svg(I_alert,15,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">'+esc(txt)+'</span></div>'; }
-  var seenS={}; var daySug=sol.suggestions.filter(function(su){return su.d===sd;}).filter(function(x){ if(seenS[x.name])return false; seenS[x.name]=1; return true; });
+  var seenS={}; var daySug=!getPin()?[]:sol.suggestions.filter(function(su){return su.d===sd;}).filter(function(x){ if(seenS[x.name])return false; seenS[x.name]=1; return true; });
   if(daySug.length){
     h+='<div style="background:#fff;border:1.5px solid #E7DAF5;border-radius:16px;padding:12px 14px;margin-top:11px;box-shadow:0 10px 24px -22px rgba(26,26,46,.4);">';
     h+='<div style="display:flex;align-items:center;gap:7px;margin-bottom:9px;">'+svg(I_users,15,'#6A4CC0',2)+'<span style="font-size:12px;font-weight:700;color:#6A4CC0;">ดึงคนจากสาขาอื่นมาช่วยได้</span></div>';
@@ -719,7 +745,7 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
       '<span style="font-size:12px;color:#5A7488;">'+specials.length+' คน</span></div>';
     h+='<div style="display:flex;flex-direction:column;gap:8px;">'+specials.map(function(a){ return personCard(a,bid,sd); }).join('')+'</div>';
   }
-  if(!editable){ h+='<div style="text-align:center;margin-top:16px;font-size:11.5px;color:#9A8C7C;">นี่คือพรีวิว — กด "จัดตารางอัตโนมัติ" ในแท็บตั้งค่าเพื่อจัดจริงและแก้ไขได้</div>'; }
+  if(!isGenerated(sd)){ h+='<div style="text-align:center;margin-top:16px;font-size:11.5px;color:#9A8C7C;">นี่คือพรีวิว — กด "จัดตารางอัตโนมัติ" ในแท็บตั้งค่าเพื่อจัดจริงและแก้ไขได้</div>'; }
   h+='<div style="height:8px;"></div>';
   return h;
 }
@@ -800,6 +826,7 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
     h+='</div>';
   }
   h+='<button onclick="reshuffle()" style="width:100%;margin-top:8px;border:none;background:none;cursor:pointer;font-weight:700;font-size:12px;color:#C77A1B;text-decoration:underline;">สุ่มจัดใหม่ (สลับคน)</button>';
+  h+='<button onclick="lockApp()" style="width:100%;margin-top:4px;border:none;background:none;cursor:pointer;font-weight:600;font-size:11.5px;color:#9A8C7C;display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_lock,12,'#9A8C7C',2)+'ล็อกเครื่องนี้ (กลับเป็นดูอย่างเดียว)</button>';
   h+='</div>';
 
   // ===== สรุปทั้งเครือ (อ่านจบจุดเดียว ไม่ต้องไล่ดูราย่สาขา) =====
