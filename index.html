@@ -119,7 +119,9 @@ function buildLearnMap(learnings){
 }
 function cloneDay(dd){ dd=dd||{};
   var o={}; SLOTS.forEach(function(s){ o[s]=[]; });
-  SLOTS.forEach(function(s){ (dd[s]||[]).forEach(function(a){ o[s].push({id:a.id,pos:a.pos,via:a.via,homeBranch:a.homeBranch,locked:!!a.locked}); }); });
+  SLOTS.forEach(function(s){ (dd[s]||[]).forEach(function(a){ var c={id:a.id,pos:a.pos,via:a.via,homeBranch:a.homeBranch,locked:!!a.locked};
+    if(a.t) c.t=a.t;   // เวลาจริงที่หน้างานกำหนด (ต่างจากกะมาตรฐาน) — ต้องไม่หายตอน clone/save
+    o[s].push(c); }); });
   return o; }
 
 function solveAll(state, opts){
@@ -180,7 +182,9 @@ function solveAll(state, opts){
     for(var d=0;d<7;d++){ var sd=sb[d]; if(!sd) continue;
       SLOTS.forEach(function(slot){ (sd[slot]||[]).forEach(function(a){
         if(!regenSet[d] || a.locked){ var e=Emap[a.id]; if(!e) return; if(slotsOfDay(a.id,d).indexOf(slot)>=0) return;
-          weeks[b.id][d][slot].push({id:a.id,pos:a.pos,via:a.via||'home',homeBranch:a.homeBranch||e.branchId,locked:!!a.locked});
+          var pp={id:a.id,pos:a.pos,via:a.via||'home',homeBranch:a.homeBranch||e.branchId,locked:!!a.locked};
+          if(a.t) pp.t=a.t;   // เวลาจริงหน้างาน — พกไปถึงหน้าจอ
+          weeks[b.id][d][slot].push(pp);
           var k=a.id+'|'+d; (gSlots[k]=gSlots[k]||[]).push(slot);
           gDays[a.id]=gDays[a.id]||{}; gDays[a.id][d]=1; gHours[a.id]=(gHours[a.id]||0)+SLOTM[slot].hours;
           if(a.via==='loan') gLoan[a.id]=(gLoan[a.id]||0)+1;
@@ -600,7 +604,7 @@ function personCard(a,bid,d){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:
   if((window._splitToday||{})[a.id]>1){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_clock,10,'#B5651D',2)+'กะเบรค (2 พีค)</span>'; }
   if(badges) h+='<div>'+badges+'</div>';
   h+='</div>';
-  h+='<span class="num" style="font-weight:700;font-size:12.5px;color:#3A4A55;background:#F1F5F8;padding:5px 10px;border-radius:9px;white-space:nowrap;flex:0 0 auto;">'+SLOTM[a.slot].time+'</span>';
+  h+='<span class="num" style="font-weight:700;font-size:12.5px;color:'+(a.t?'#B5651D':'#3A4A55')+';background:'+(a.t?'#FFF1D6':'#F1F5F8')+';padding:5px 10px;border-radius:9px;white-space:nowrap;flex:0 0 auto;">'+esc(a.t||SLOTM[a.slot].time)+'</span>';
   h+='</div>';
   return h;
 }
