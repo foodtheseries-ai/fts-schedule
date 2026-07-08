@@ -144,6 +144,8 @@ function cloneDay(dd){ dd=dd||{};
   SLOTS.forEach(function(s){ (dd[s]||[]).forEach(function(a){ var c={id:a.id,pos:a.pos,via:a.via,homeBranch:a.homeBranch,locked:!!a.locked};
     if(a.t) c.t=a.t;   // เวลาจริงที่หน้างานกำหนด (ต่างจากกะมาตรฐาน) — ต้องไม่หายตอน clone/save
     if(a.ext) c.ext=true;   // กะยาว OT (บรีสโมเดล)
+    if(a.name) c.name=a.name;   // ชื่อคนที่ออกจากงานแล้ว (ประวัติจริง) — roster ไม่ส่งมา ต้องพกชื่อไว้เอง
+    if(a.off) c.off=true;   // กะช่วยวันหยุด — คงไว้ ไม่นับเป็นวันทำงาน
     o[s].push(c); }); });
   return o; }
 
@@ -213,10 +215,16 @@ function solveAll(state, opts){
   branches.forEach(function(b){ var sb=storedGrid[b.id]; if(!sb) return;
     for(var d=0;d<7;d++){ var sd=sb[d]; if(!sd) continue;
       SLOTS.forEach(function(slot){ (sd[slot]||[]).forEach(function(a){
-        if(!regenSet[d] || a.locked){ var e=Emap[a.id]; if(!e) return; if(slotsOfDay(a.id,d).indexOf(slot)>=0) return;
+        if(!regenSet[d] || a.locked){ var e=Emap[a.id];
+          // คนที่ออกจากงานแล้ว (ไม่มีใน roster) แต่มีชื่อฝังไว้ = ประวัติจริง → คงไว้ให้แสดง แต่ไม่นับเข้าสถิติคน
+          if(!e){ if(a.name){ var gp={id:a.id,pos:a.pos,via:a.via||'home',homeBranch:a.homeBranch,locked:!!a.locked,name:a.name}; if(a.t) gp.t=a.t; if(a.ext) gp.ext=true; if(a.off) gp.off=true; weeks[b.id][d][slot].push(gp); } return; }
+          if(slotsOfDay(a.id,d).indexOf(slot)>=0) return;
           var pp={id:a.id,pos:a.pos,via:a.via||'home',homeBranch:a.homeBranch||e.branchId,locked:!!a.locked};
           if(a.t) pp.t=a.t;   // เวลาจริงหน้างาน — พกไปถึงหน้าจอ
           if(a.ext) pp.ext=true;
+          if(a.name) pp.name=a.name;
+          // กะช่วยวันหยุด (มาช่วยไม่กี่ชม.ในวันที่ตัวเองหยุด) — แสดง+คิดเงิน(วันเสริมใน OT card) แต่ไม่นับเป็นวันทำงาน (ยังได้หยุดวันนั้น + ทำครบ 6 วันได้ตามกฎ)
+          if(a.off){ pp.off=true; weeks[b.id][d][slot].push(pp); return; }
           weeks[b.id][d][slot].push(pp);
           var k=a.id+'|'+d; (gSlots[k]=gSlots[k]||[]).push(slot);
           gDays[a.id]=gDays[a.id]||{}; gDays[a.id][d]=1; gHours[a.id]=(gHours[a.id]||0)+SLOTM[slot].hours+(a.ext?2:0);
@@ -693,18 +701,18 @@ function render(){
   app.innerHTML=h;
 }
 function tabBtn(label,on,fn){ return '<button onclick="'+fn+'" style="border:none;border-radius:9px;padding:7px 14px;cursor:pointer;font-weight:700;font-size:12px;background:'+(on?'#fff':'transparent')+';color:'+(on?'#1A1A2E':'#8A7E6E')+';box-shadow:'+(on?'0 3px 8px -4px rgba(0,0,0,.3)':'none')+';">'+label+'</button>'; }
-function nameChipMini(a,bid,d,slot,editable){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:'?'};
+function nameChipMini(a,bid,d,slot,editable){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:a.name||'?',gone:!!a.name};
   var loan=a.via==='loan'; var cg=e.commuteGroup;
   var onclick = editable ? ' onclick="openEditPerson(\''+bid+'\','+d+',\''+slot+'\',\''+a.id+'\')" style="cursor:pointer;' : ' style="';
   return '<span'+onclick+'display:inline-flex;align-items:center;gap:4px;background:'+m.bg+';color:'+m.color+';font-size:11px;font-weight:600;padding:3px 8px;border-radius:8px;">'+
     ((a.locked&&S.editMode)?svg(I_lock,9,m.color,2):'')+(loan?svg(I_arrow,9,m.color,2):'')+(cg?svg(I_car,10,m.color,1.8):'')+esc(e.name)+'</span>';
 }
 
-function personCard(a,bid,d){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:'?'};
+function personCard(a,bid,d){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:a.name||'?',gone:!!a.name};
   var loan=a.via==='loan'; var cg=e.commuteGroup;
   var h='<div onclick="openEditPerson(\''+bid+'\','+d+',\''+a.slot+'\',\''+a.id+'\')" style="background:#fff;border-radius:16px;padding:8px 12px;display:flex;align-items:center;gap:11px;box-shadow:0 8px 20px -20px rgba(26,26,46,.4);cursor:pointer;">';
   h+='<span style="width:34px;height:34px;border-radius:50%;background:'+m.bg+';display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(I_person,20,m.color)+'</span>';
-  h+='<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:5px;">'+esc(e.name)+((a.locked&&S.editMode)?svg(I_lock,12,'#9A8C7C',2):'')+'</div>';
+  h+='<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:5px;">'+esc(e.name)+(e.gone?'<span style="font-size:9px;font-weight:700;color:#9A8C7C;background:#EEE7DC;padding:1px 6px;border-radius:6px;">ออกแล้ว</span>':'')+((a.locked&&S.editMode)?svg(I_lock,12,'#9A8C7C',2):'')+'</div>';
   h+='<div style="font-size:11px;font-weight:600;color:'+m.color+';margin-top:1px;">'+m.label+'</div>';
   var badges='';
   if(loan){ var from=(S.branches.find(function(b){return b.id===a.homeBranch;})||{}).short||'';
@@ -713,6 +721,7 @@ function personCard(a,bid,d){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:
   if((window._splitToday||{})[a.id]>1){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 7px;border-radius:6px;margin-top:4px;margin-right:4px;">'+svg(I_clock,10,'#B5651D',2)+'คุม 2 พีค</span>'; }
   var otN=(window._otToday||{})[a.id];
   if(otN){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:800;color:#fff;background:#B5651D;padding:2px 7px;border-radius:6px;margin-top:4px;">OT +'+otN+' ชม. (คิดเงินเพิ่ม)</span>'; }
+  if(a.off){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#2C6446;background:#E4F0E8;padding:2px 7px;border-radius:6px;margin-top:4px;">ช่วยวันหยุด (นับเป็นวันหยุด)</span>'; }
   if(badges) h+='<div>'+badges+'</div>';
   h+='</div>';
   h+='<span class="num" style="font-weight:700;font-size:12.5px;color:'+(a.t?'#B5651D':'#3A4A55')+';background:'+(a.t?'#FFF1D6':'#F1F5F8')+';padding:5px 10px;border-radius:9px;white-space:nowrap;flex:0 0 auto;">'+esc(a.t||SLOTM[a.slot].time)+'</span>';
@@ -921,7 +930,7 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
       var work={}, off=[];
       var sb=solRest[e.branchId]; if(!sb) return;
       for(var d=0;d<7;d++){ var has=false;
-        S.branches.forEach(function(b){ var w=solRest[b.id].week[d]||{}; SLOTS.forEach(function(sl){ (w[sl]||[]).forEach(function(a){ if(a.id===e.id) has=true; }); }); });
+        S.branches.forEach(function(b){ var w=solRest[b.id].week[d]||{}; SLOTS.forEach(function(sl){ (w[sl]||[]).forEach(function(a){ if(a.id===e.id && !a.off) has=true; }); }); });
         var preHire = e.hiredAt && wkD[d] && wkD[d] < e.hiredAt;
         if(has) work[d]=1; else if(!preHire) off.push(d);
       }
