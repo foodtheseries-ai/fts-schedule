@@ -159,7 +159,7 @@ function solveAll(state, opts){
     for(var t=0;t<8;t++){
       var st2=Object.assign({},state,{seed:(state.seed||1)+t*101});
       var r=solveAll(st2, Object.assign({},opts,{_single:true}));
-      var cost=(r._underTarget||0)*8 + (r._paidLoans||0)*0.5;   // ครบมาก่อน แล้วค่อยประหยัดเที่ยวรถ
+      var cost=(r._underTarget||0)*8 + (r._restViol||0)*2 + (r._paidLoans||0)*0.5;   // ครบมาก่อน · เลี่ยงหยุดซ้ำ >1 วัน (เบา ๆ ไม่ให้ชน rule-3) · แล้วค่อยประหยัดเที่ยวรถ
       Object.keys(r).forEach(function(bid){ if(bid.charAt(0)==='_') return;
         cost += r[bid].coverShort.length*10 + r[bid].peakShort.length*3 + r[bid].unscheduled.length*30; });
       if(cost<bestCost){ bestCost=cost; best=r; }
@@ -445,10 +445,58 @@ function solveAll(state, opts){
           return ca-cb || prefOrder.indexOf(a2)-prefOrder.indexOf(b2); });
         doAssign(e.branchId,d,ok[0],e,(e.positions[0]||'cook'),'home'); }); }); };
   fillTo6(true); fillTo6(false);
+  // กฎวันหยุด (ซัน 9 ก.ค.): (1) แต่ละคนหยุด ≤1 วัน/สัปดาห์ · (2) ก่อนเริ่มงานไม่นับหยุด · (3) หยุดพร้อมกัน ≤maxOff คน/วัน/สาขา (สลับกันหยุด)
+  var restBalance=function(){
+    branches.forEach(function(b){ var bid=b.id;
+      var bEmps=E.filter(function(e){ return e.branchId===bid; });
+      var maxOff=Math.max(2, Math.ceil(bEmps.length/7));   // ≤7 คน = 2 · ใหญ่กว่านั้นสเกลขึ้นเพื่อให้กระจายได้ใน 7 วัน
+      var isRest=function(e,d){ return !hiredBlock(e,d) && slotsOfDay(e.id,d).length===0; };   // ก่อนเริ่มงาน = ไม่นับหยุด · off-helper ไม่อยู่ใน gSlots = นับเป็นหยุด
+      var totalRest=function(e){ var n=0; for(var d=0;d<7;d++) if(isRest(e,d)) n++; return n; };
+      var dayRest=function(d){ return bEmps.filter(function(e){ return isRest(e,d); }).length; };
+      var placeOn=function(e,d){   // ให้ e ทำงานวัน d ที่สาขาตัวเอง (regen เท่านั้น) — คืน true ถ้าได้
+        if(!regenSet[d]||hiredBlock(e,d)||slotsOfDay(e.id,d).length) return false;
+        var order=e.home==='night'?['night','morning','mid']:e.home==='mid'?['mid','morning','night']:['morning','mid','night'];
+        for(var i=0;i<order.length;i++){ var slot=order[i];
+          if(!slotAvail(e,slot)) continue;
+          if((slot==='morning'||slot==='mid')&&prevNight(e.id,d)) continue;
+          if(slot==='night'){ var nx=slotsOfDay(e.id,d+1); if(nx.indexOf('morning')>=0||nx.indexOf('mid')>=0||nx.indexOf('lunch')>=0) continue; }
+          if((gHours[e.id]||0)+SLOTM[slot].hours>(e.canOt?72:60)) continue;
+          doAssign(bid,d,slot,e,(e.positions[0]||'cook'),'home'); return true;
+        } return false; };
+      // Phase 1: ใครหยุด >1 วัน → ดันให้ทำงานวัน regen ที่หยุดอยู่ จนเหลือหยุด 1
+      bEmps.forEach(function(e){ var g=0;
+        while(totalRest(e)>1 && g<7){ g++; var placed=false;
+          for(var d=0;d<7;d++){ if(isRest(e,d)&&regenSet[d]){ if(placeOn(e,d)){ placed=true; break; } } }
+          if(!placed) break; } });
+      // Phase 2: วัน regen ที่หยุดเกิน maxOff → ย้ายวันหยุดของคนไปวันที่ยังไม่เต็ม (ทำงานวันล้น พักวันที่ว่าง)
+      var g2=0;
+      for(var d=0;d<7;d++){ if(!regenSet[d]) continue;
+        while(dayRest(d)>maxOff && g2<120){ g2++;
+          var resters=bEmps.filter(function(e){ return isRest(e,d); });
+          var done=false;
+          for(var ri=0; ri<resters.length && !done; ri++){ var P=resters[ri];
+            for(var d2=0; d2<7 && !done; d2++){ if(!regenSet[d2]||d2===d) continue;
+              if(dayRest(d2)>=maxOff) continue;                       // วันปลายทางหยุดเต็มแล้ว
+              var pslots=slotsOfDay(P.id,d2); if(pslots.length!==1) continue;   // ทำ 1 กะ(ย้ายง่าย)
+              var sl=pslots[0]; var dm=demandOf(brPlan[bid],d2);
+              var pos=(weeks[bid][d2][sl].filter(function(a){return a.id===P.id;})[0]||{}).pos;
+              var surplus=(sl==='morning'||sl==='night') ? cellPos(bid,d2,sl,pos)>(dm[sl][pos]||0) : true;  // เอาออกแล้วยังครบ demand
+              if(!surplus) continue;
+              removeAssign(bid,d2,sl,P.id);           // P หยุด d2 แทน
+              if(placeOn(P,d)) done=true;              // P มาทำวัน d (วันล้น) → dayRest(d) ลด, dayRest(d2) เพิ่ม
+              else doAssign(bid,d2,sl,P,pos,'home');   // ทำ d ไม่ได้ → คืนกลับ ลองคนอื่น
+            } }
+          if(!done) break;   // แก้วันนี้ต่อไม่ได้แล้ว
+        } }
+    });
+  };
+  restBalance();
   // นับคนที่ยังไม่ถึงเป้าวัน (ใช้เลือก seed ที่จัดครบกว่า)
   var underTarget=0; E.forEach(function(e){ var free=0; for(var d=0;d<7;d++){ if(regenSet[d]&&!slotsOfDay(e.id,d).length&&!hiredBlock(e,d)) free++; }
     if(mustFull[e.id]&&free>0) underTarget+=free;
     else if(!mustFull[e.id]&&workDays(e.id)<targetOf(e)) underTarget+=(targetOf(e)-workDays(e.id)); });
+  // นับคนหยุด >1 วัน/สัปดาห์ (กฎซัน ≤1) — ใส่ใน seed cost ให้ best-of-8 เลี่ยง arrangement ที่คนถูกล็อก H4 จนหยุดซ้ำ
+  var restViol=0; E.forEach(function(e){ var r=0; for(var d=0;d<7;d++){ if(!hiredBlock(e,d) && !slotsOfDay(e.id,d).length) r++; } if(r>1) restViol+=(r-1); });
 
   // ใครถูกจัดบ้าง (ข้ามสาขา) — ใช้เช็ค "จัดครบทุกคนไหม"
   var scheduled={}; branches.forEach(function(b){ for(var d=0;d<7;d++) SLOTS.forEach(function(sl){ weeks[b.id][d][sl].forEach(function(a){ scheduled[a.id]=1; }); }); });
@@ -481,7 +529,7 @@ function solveAll(state, opts){
     var fair=bEmps.map(function(e){ var days=workDays(e.id), hours=gHours[e.id]||0; return {id:e.id,name:e.name,days:days,hours:hours,target:targetOf(e),avail:availDays(e)}; });
     // วันหยุดจริง = วันที่ไม่ได้เข้ากะ (ระบบเลือกให้ตามหน้างาน) + จดว่าใครไม่ตรงวันที่ขอ
     var offByDay={}; var offMoved=[];
-    for(var d3=0;d3<7;d3++){ (function(d){ offByDay[d]=bEmps.filter(function(e){return !slotsOfDay(e.id,d).length;}).map(function(e){return e.name;}); })(d3); }
+    for(var d3=0;d3<7;d3++){ (function(d){ offByDay[d]=bEmps.filter(function(e){return !hiredBlock(e,d) && !slotsOfDay(e.id,d).length;}).map(function(e){return e.name;}); })(d3); }
     bEmps.forEach(function(e){ if(!e.off.length) return;
       var actual=[]; for(var d4=0;d4<7;d4++){ if(!slotsOfDay(e.id,d4).length) actual.push(d4); }
       if(actual.length===1 && e.off.indexOf(actual[0])<0) offMoved.push({name:e.name, want:e.off[0], got:actual[0]}); });
@@ -489,6 +537,7 @@ function solveAll(state, opts){
       unscheduled:unscheduled, fair:fair, loaners:loanersReal, suggestions:suggestions, offByDay:offByDay, offMoved:offMoved };
   });
   result._underTarget=underTarget;
+  result._restViol=restViol;
   // นับยืมที่ "มีค่ารถจริง" (ไม่นับบาส/จ๋าไปสาทร — บ้านอยู่นั่น) — ใช้เลือก seed ที่ประหยัดสุดในบรรดาที่จัดครบเท่ากัน
   var paid=0; branches.forEach(function(b){ for(var d=0;d<7;d++) SLOTS.forEach(function(sl){ weeks[b.id][d][sl].forEach(function(a){
     if(a.via==='loan'){ var e=Emap[a.id]; if(!(e&&e.cg&&brName[b.id]==='สาทร')) paid++; } }); }); });
