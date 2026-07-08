@@ -33,19 +33,27 @@ function api(fn,args){ return fetch(SUPA+'/rest/v1/rpc/'+fn,{method:'POST',
   body:JSON.stringify(args||{})}).then(function(r){ if(!r.ok) return r.text().then(function(t){throw new Error(t);});
   return r.status===204?null:r.json(); }); }
 
-/* ===== meta (ตรง prototype) ===== */
+/* ===== meta ===== */
 var POSM={cook:{label:'กุ๊ก',color:'#C4571E',bg:'#FBE9D2'}, kasst:{label:'ผู้ช่วยครัว',color:'#2C7A56',bg:'#DCEFE4'}, cash:{label:'แคชเชียร์',color:'#2960C4',bg:'#E4F0FF'}};
-var SLOTM={morning:{label:'เช้า',dot:'#F2B45A'}, mid:{label:'กลาง',dot:'#6A5AC0'}, night:{label:'ดึก',dot:'#3E8FC4'}};
+var SLOTM={morning:{label:'เช้า',dot:'#F2B45A',time:'08:00–18:00'}, mid:{label:'กลาง',dot:'#6A5AC0',time:'11:00–17:00'}, night:{label:'ดึก',dot:'#3E8FC4',time:'17:00–03:00'}};
 var DOW=['จ','อ','พ','พฤ','ศ','ส','อา'];
 var DOWF=['จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์','อาทิตย์'];
 var SLOT_DB2ENG={morning:'morning',mid:'mid',late:'night'};
-function demandOf(){ return {morning:{cook:1,kasst:1,cash:1}, mid:{cook:0,kasst:0,cash:0}, night:{cook:1,kasst:1,cash:1}}; }
+var PLANS=[
+  {key:'lean',label:'ประหยัด',desc:'กุ๊ก 1 ต่อกะ',m:0,mid:0,n:0},
+  {key:'std',label:'มาตรฐาน',desc:'กุ๊ก 2 เช้า/ดึก',m:1,mid:0,n:1},
+  {key:'busy',label:'คนเยอะ',desc:'เช้า 3·กลาง 1·ดึก 3',m:2,mid:1,n:2},
+  {key:'max',label:'จัดเต็ม',desc:'เช้า 4·กลาง 1·ดึก 4',m:3,mid:1,n:3}
+];
+function demandOf(plan){ plan=plan||{cook_m:0,cook_mid:0,cook_n:0};
+  return {morning:{cook:1+(plan.cook_m||0),kasst:1,cash:1}, mid:{cook:(plan.cook_mid||0),kasst:0,cash:0}, night:{cook:1+(plan.cook_n||0),kasst:1,cash:1}}; }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 function hashN(str){ var h=0; for(var i=0;i<str.length;i++) h=((h*31)+str.charCodeAt(i))>>>0; return h; }
 function weekDates(){ var t=new Date(); var wd=(t.getDay()+6)%7; var mon=new Date(t); mon.setHours(0,0,0,0); mon.setDate(t.getDate()-wd);
   var arr=[]; for(var d=0;d<7;d++){ var x=new Date(mon); x.setDate(mon.getDate()+d); arr.push(x); } return arr; }
+function isoDate(dt){ return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); }
 
-/* ===== ICONS (inline stroke svg — ห้ามอีโมจิ) ===== */
+/* ===== icons ===== */
 function svg(inner,s,st,sw){ s=s||18; return '<svg width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="'+(st||'currentColor')+'" stroke-width="'+(sw||1.8)+'" stroke-linecap="round" stroke-linejoin="round">'+inner+'</svg>'; }
 var I_person='<circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/>';
 var I_refresh='<path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/>';
@@ -60,34 +68,70 @@ var I_arrow='<path d="M5 12h14M13 6l6 6-6 6"/>';
 var I_plus='<path d="M12 5v14M5 12h14"/>';
 var I_chev='<path d="M9 6l6 6-6 6"/>';
 var I_userplus='<circle cx="9" cy="8" r="3.4"/><path d="M2.5 20c.6-3.8 3-6 6.5-6s5.9 2.2 6.5 6"/><path d="M17 8h6M20 5v6"/>';
+var I_lock='<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>';
+var I_car='<path d="M5 16.5h14M6.5 16.5v2M17.5 16.5v2M4 12.5l1.6-4.2A2 2 0 0 1 7.5 7h9a2 2 0 0 1 1.9 1.3l1.6 4.2M4 12.5h16v3.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3.5Z"/><circle cx="8" cy="16.5" r="0.1"/><circle cx="16" cy="16.5" r="0.1"/>';
+var I_grid='<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>';
+var I_x='<path d="M6 6l12 12M18 6L6 18"/>';
+var I_bulb='<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2h5c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z"/>';
 
-/* ===== ENGINE (solveAll — จัดทุกสาขาพร้อมกัน ยืมข้ามสาขาสลับเวียน · ตรง prototype) ===== */
-function solveAll(state){
+/* ===== ENGINE v3 ===== */
+function buildLearnMap(learnings){
+  var m={};
+  (learnings||[]).forEach(function(l){ if(!m[l.employee_id]) m[l.employee_id]={slot:{},day:{}};
+    if(l.kind==='avoid_slot'||l.kind==='prefer_slot'){ if(l.slot) m[l.employee_id].slot[l.slot]=(m[l.employee_id].slot[l.slot]||0)+l.delta; }
+    else if(l.kind==='avoid_day'||l.kind==='prefer_day'){ if(l.day!=null) m[l.employee_id].day[l.day]=(m[l.employee_id].day[l.day]||0)+l.delta; }
+  });
+  return m;
+}
+function cloneDay(dd){ dd=dd||{morning:[],mid:[],night:[]};
+  var o={morning:[],mid:[],night:[]};
+  ['morning','mid','night'].forEach(function(s){ (dd[s]||[]).forEach(function(a){ o[s].push({id:a.id,pos:a.pos,via:a.via,homeBranch:a.homeBranch,locked:!!a.locked}); }); });
+  return o; }
+
+function solveAll(state, opts){
+  opts=opts||{};
+  var storedGrid=opts.storedGrid||{};
+  var regen=opts.regenDays||[0,1,2,3,4,5,6];
+  var regenSet={}; regen.forEach(function(d){ regenSet[d]=1; });
   var POS=['cook','kasst','cash'];
-  var demand=demandOf();
   var seed=state.seed||1;
   var branches=state.branches;
-  var brName={}; branches.forEach(function(b){ brName[b.id]=b.short||b.name; });
+  var brName={}, brPlan={}; branches.forEach(function(b){ brName[b.id]=b.short||b.name; brPlan[b.id]=b.plan||{}; });
+  var learnMap=buildLearnMap(state.learnings);
   var E=state.employees.map(function(e){
     var pref=(e.preferredSlots&&e.preferredSlots.length)?e.preferredSlots.map(function(s){return SLOT_DB2ENG[s]||s;}):['morning','mid','night'];
     return { id:e.id, name:e.name, branchId:e.branchId,
       positions:(e.positions&&e.positions.length)?e.positions:[],
       pref:pref, home:pref[0]||'morning',
-      off:e.off||[], loanOk:!!e.loanOk }; });
+      off:e.off||[], loanOk:!!e.loanOk, cg:e.commuteGroup||null }; });
+  var Emap={}; E.forEach(function(e){ Emap[e.id]=e; });
   var weeks={}; branches.forEach(function(b){ weeks[b.id]={}; for(var d=0;d<7;d++) weeks[b.id][d]={morning:[],mid:[],night:[]}; });
   var gAssigned={}, gWork={}, gLoan={};
   var assignedG=function(id,d){ return !!gAssigned[id+'|'+d]; };
   var prevNightB=function(bid,id,d){ return d>0 && weeks[bid][d-1].night.some(function(a){return a.id===id;}); };
   var workCount=function(id){ return gWork[id]||0; };
   var cellPos=function(bid,d,slot,pos){ return weeks[bid][d][slot].filter(function(a){return a.pos===pos;}).length; };
-  var doAssign=function(bid,d,slot,e,pos,via){ weeks[bid][d][slot].push({id:e.id,pos:pos,via:via,homeBranch:e.branchId});
+  var doAssign=function(bid,d,slot,e,pos,via,locked){ weeks[bid][d][slot].push({id:e.id,pos:pos,via:via,homeBranch:e.branchId,locked:!!locked});
     gAssigned[e.id+'|'+d]=true; gWork[e.id]=(gWork[e.id]||0)+1; if(via==='loan') gLoan[e.id]=(gLoan[e.id]||0)+1; };
+  // slot ที่คนหนึ่งถูกจัดในวันนั้น (ข้ามสาขา) — ใช้กับ carpool
+  var slotOf=function(id,d){ var r=null; branches.forEach(function(b){ ['morning','mid','night'].forEach(function(sl){ if(weeks[b.id][d][sl].some(function(a){return a.id===id;})) r=sl; }); }); return r; };
+
+  // 0) pre-place: วันที่ไม่ regen = คงทั้งวัน · วันที่ regen = เฉพาะที่ล็อกมือ
+  branches.forEach(function(b){ var sb=storedGrid[b.id]; if(!sb) return;
+    for(var d=0;d<7;d++){ var sd=sb[d]; if(!sd) continue;
+      ['morning','mid','night'].forEach(function(slot){ (sd[slot]||[]).forEach(function(a){
+        if(!regenSet[d] || a.locked){ var e=Emap[a.id]; if(!e) return; if(gAssigned[a.id+'|'+d]) return;
+          weeks[b.id][d][slot].push({id:a.id,pos:a.pos,via:a.via||'home',homeBranch:a.homeBranch||e.branchId,locked:!!a.locked});
+          gAssigned[a.id+'|'+d]=true; gWork[a.id]=(gWork[a.id]||0)+1; if(a.via==='loan') gLoan[a.id]=(gLoan[a.id]||0)+1;
+        } }); });
+    } });
+
   var eligible=function(e,bid,d,slot,pos,loan){
-    if(e.positions.indexOf(pos)<0) return false;              // H5
-    if(e.off.indexOf(d)>=0) return false;                     // H2
-    if(assignedG(e.id,d)) return false;                       // H1 global
-    if(slot==='morning'&&prevNightB(bid,e.id,d)) return false; // H4
-    if(workCount(e.id)>=6) return false;                      // H3
+    if(e.positions.indexOf(pos)<0) return false;
+    if(e.off.indexOf(d)>=0) return false;
+    if(assignedG(e.id,d)) return false;
+    if(slot==='morning'&&prevNightB(bid,e.id,d)) return false;
+    if(workCount(e.id)>=6) return false;
     if(loan){ if(e.branchId===bid) return false; if(!e.loanOk) return false; }
     else { if(e.branchId!==bid) return false; }
     return true; };
@@ -97,28 +141,37 @@ function solveAll(state){
     s += (e.pref.indexOf(slot)>=0)?40:-40;
     s += (e.home===slot)?25:0;
     s -= 30*workCount(e.id);
-    if(loan) s -= 250 + 80*(gLoan[e.id]||0);                  // สลับตัวช่วยเวียนกัน
+    if(loan) s -= 250 + 80*(gLoan[e.id]||0);
+    // learning bias
+    var lm=learnMap[e.id]; if(lm){ s += (lm.slot[slot]||0) + (lm.day[d]||0); }
+    // carpool: จับคู่เดินทาง — เข้ากะ วัน+เวลา เดียวกัน
+    if(e.cg){ var mateSame=false, mateOther=false;
+      E.forEach(function(o){ if(o.id===e.id||o.cg!==e.cg) return; if(!assignedG(o.id,d)) return;
+        var os=slotOf(o.id,d); if(os===slot) mateSame=true; else if(os) mateOther=true; });
+      if(mateSame) s += 900; else if(mateOther) s -= 400; }
     s += (hashN(e.id+'|'+bid+'|'+d+'|'+slot+'|'+seed)%100)*0.05;
     return s; };
   var pick=function(bid,d,slot,pos,loan){ var best=null,bs=-1e9; E.forEach(function(e){ if(!eligible(e,bid,d,slot,pos,loan))return;
     var s=score(e,bid,d,slot,pos,loan); if(s>bs){bs=s;best=e;} }); return best; };
-  // PASS 1 คนสาขาตัวเอง
-  for(var d=0;d<7;d++){ (function(d){ branches.forEach(function(b){ var bid=b.id;
+
+  // 1) PASS1 คนสาขาตัวเอง (เฉพาะวัน regen)
+  for(var d=0;d<7;d++){ if(!regenSet[d]) continue; (function(d){ branches.forEach(function(b){ var bid=b.id; var dm=demandOf(brPlan[bid]);
     ['morning','night','mid'].forEach(function(slot){ POS.forEach(function(pos){ var g=0;
-      while(cellPos(bid,d,slot,pos)<(demand[slot][pos]||0)&&g<20){ var c=pick(bid,d,slot,pos,false); if(!c)break; doAssign(bid,d,slot,c,pos,'home'); g++; } }); }); }); })(d); }
-  // PASS 2 ยืมข้ามสาขา (เฉพาะ min กะหลักที่ยังขาด)
+      while(cellPos(bid,d,slot,pos)<(dm[slot][pos]||0)&&g<20){ var c=pick(bid,d,slot,pos,false); if(!c)break; doAssign(bid,d,slot,c,pos,'home'); g++; } }); }); }); })(d); }
+  // 2) PASS2 ยืมข้ามสาขา (เฉพาะ min กะหลัก · วัน regen)
   var loaners={}; branches.forEach(function(b){ loaners[b.id]=[]; });
-  for(var d2=0;d2<7;d2++){ (function(d){ branches.forEach(function(b){ var bid=b.id;
+  for(var d2=0;d2<7;d2++){ if(!regenSet[d2]) continue; (function(d){ branches.forEach(function(b){ var bid=b.id; var dm=demandOf(brPlan[bid]);
     ['morning','night'].forEach(function(slot){ POS.forEach(function(pos){ var g=0;
-      while(cellPos(bid,d,slot,pos)<(demand[slot][pos]||0)&&g<20){ var c=pick(bid,d,slot,pos,true); if(!c)break;
+      while(cellPos(bid,d,slot,pos)<(dm[slot][pos]||0)&&g<20){ var c=pick(bid,d,slot,pos,true); if(!c)break;
         doAssign(bid,d,slot,c,pos,'loan'); loaners[bid].push({name:c.name,from:brName[c.branchId],d:d,slot:slot,pos:pos}); g++; } }); }); }); })(d2); }
+
   // reports
   var result={};
-  branches.forEach(function(b){ var bid=b.id; var week=weeks[bid];
+  branches.forEach(function(b){ var bid=b.id; var week=weeks[bid]; var dm=demandOf(brPlan[bid]);
     var bEmps=E.filter(function(e){return e.branchId===bid;});
     var shortDays=[]; var coverShort=[];
     for(var d=0;d<7;d++){ (function(d){ ['morning','night'].forEach(function(slot){ POS.forEach(function(pos){
-      var need=demand[slot][pos]||0; var got=cellPos(bid,d,slot,pos); if(got<need) coverShort.push({d:d,slot:slot,pos:pos,short:need-got}); }); }); })(d); }
+      var need=dm[slot][pos]||0; var got=cellPos(bid,d,slot,pos); if(got<need) coverShort.push({d:d,slot:slot,pos:pos,short:need-got}); }); }); })(d); }
     coverShort.forEach(function(c){ if(shortDays.indexOf(c.d)<0) shortDays.push(c.d); });
     var seen={}; var suggestions=[];
     coverShort.forEach(function(c){ E.forEach(function(e){
@@ -136,42 +189,100 @@ function solveAll(state){
 }
 
 /* ===== STATE ===== */
-var S={ mode:'view', seed:7, selDay:null, activeBranch:null, branches:[], employees:[], editEmp:null, toast:null, loading:true };
+var S={ mode:'view', viewMode:'day', seed:7, selDay:null, activeBranch:null, branches:[], employees:[], learnings:[],
+  grid:{}, editEmp:null, editCell:null, genOpen:false, genDays:[0,1,2,3,4,5,6], toast:null, loading:true };
 var _tt=null;
-function toast(m){ S.toast=m; render(); clearTimeout(_tt); _tt=setTimeout(function(){ S.toast=null; render(); },1900); }
+function toast(m){ S.toast=m; render(); clearTimeout(_tt); _tt=setTimeout(function(){ S.toast=null; render(); },2000); }
 function empById(id){ return S.employees.find(function(x){return x.id===id;}); }
+function weekStartIso(){ return isoDate(weekDates()[0]); }
 
 function load(){
-  api('sched_all').then(function(d){
-    S.branches=d.branches; S.employees=d.employees; S.seed=d.seed;
+  Promise.all([api('sched_all'), api('sched_grid_get',{p_week:weekStartIso()})]).then(function(res){
+    var d=res[0]; S.branches=d.branches; S.employees=d.employees; S.seed=d.seed; S.learnings=d.learnings||[];
+    S.grid=res[1]||{};
     if(!S.activeBranch||!S.branches.some(function(b){return b.id===S.activeBranch;})) S.activeBranch=(S.branches[0]||{}).id;
     S.loading=false; render();
   }).catch(function(e){ S.loading=false; document.getElementById('app').innerHTML='<div style="padding:40px;text-align:center;color:#C0392B;">โหลดไม่สำเร็จ<br><small>'+esc(e.message)+'</small></div>'; });
 }
+function planOf(bid){ var b=S.branches.find(function(x){return x.id===bid;}); return (b&&b.plan)||{cook_m:0,cook_mid:0,cook_n:0,plan_key:'lean'}; }
+function storedDaysSet(){ var s={}; Object.keys(S.grid||{}).forEach(function(bid){ var bd=S.grid[bid]||{}; Object.keys(bd).forEach(function(d){ var dd=bd[d]; if((dd.morning&&dd.morning.length)||(dd.mid&&dd.mid.length)||(dd.night&&dd.night.length)) s[+d]=1; }); }); return s; }
+function getSol(){ var stored=storedDaysSet(); var regen=[]; for(var d=0;d<7;d++) if(!stored[d]) regen.push(d);
+  return solveAll(S, {storedGrid:S.grid||{}, regenDays:regen}); }
+function isGenerated(d){ return !!storedDaysSet()[d]; }
+function saveGrid(){ return api('sched_grid_save',{p_week:weekStartIso(), p_grid:S.grid||{}}); }
 
 /* ===== ACTIONS ===== */
 function goView(){ S.mode='view'; render(); }
 function goSetup(){ S.mode='setup'; render(); }
-function pickBranch(bid){ S.activeBranch=bid; S.selDay=null; S.editEmp=null; render(); }
+function setViewMode(m){ S.viewMode=m; render(); }
+function pickBranch(bid){ S.activeBranch=bid; S.selDay=null; S.editEmp=null; S.editCell=null; render(); }
 function selDay(d){ S.selDay=d; render(); }
-function regenerate(){ api('sched_seed_bump').then(function(seed){ S.seed=seed; toast('จัดตารางใหม่แล้ว'); }); }
-function enableLoan(empId,who){ var e=empById(empId); if(!e) return; api('sched_emp_save',rpcArgs(e,{loanOk:true})).then(function(){
-    e.loanOk=true; toast('ให้ '+who+' มาช่วยแล้ว'); }); }
+
+function setPlan(bid,key){ var p=PLANS.find(function(x){return x.key===key;});
+  api('sched_set_plan',{p_branch:bid,p_key:p.key,p_m:p.m,p_mid:p.mid,p_n:p.n}).then(function(){
+    var b=S.branches.find(function(x){return x.id===bid;}); if(b) b.plan={cook_m:p.m,cook_mid:p.mid,cook_n:p.n,plan_key:p.key};
+    toast('เปลี่ยนแผนเป็น "'+p.label+'" แล้ว'); }); }
+
+function toggleGen(){ S.genOpen=!S.genOpen; render(); }
+function toggleGenDay(d){ var i=S.genDays.indexOf(d); if(i>=0)S.genDays.splice(i,1); else S.genDays.push(d); render(); }
+function genAll(){ S.genDays=[0,1,2,3,4,5,6]; render(); }
+function runGenerate(){ var days=S.genDays.slice().sort(function(a,b){return a-b;}); if(!days.length){ toast('เลือกวันก่อน'); return; }
+  var sol=solveAll(S,{storedGrid:S.grid||{},regenDays:days});
+  S.grid=S.grid||{};
+  days.forEach(function(d){ S.branches.forEach(function(b){ S.grid[b.id]=S.grid[b.id]||{}; S.grid[b.id][d]=cloneDay(sol[b.id].week[d]); }); });
+  S.genOpen=false;
+  saveGrid().then(function(){ toast('จัดตาราง '+days.length+' วันแล้ว'); }); render(); }
+function reshuffle(){ api('sched_seed_bump').then(function(seed){ S.seed=seed;
+  var days=[]; var st=storedDaysSet(); for(var d=0;d<7;d++) if(st[d]) days.push(d); if(!days.length){ days=[0,1,2,3,4,5,6]; }
+  var sol=solveAll(S,{storedGrid:{},regenDays:days});  // สุ่มใหม่ทั้งหมด (ไม่ยึดของเดิม ยกเว้นล็อก)
+  // เก็บล็อกมือไว้
+  var locks={}; S.branches.forEach(function(b){ locks[b.id]={}; var bd=S.grid[b.id]||{}; Object.keys(bd).forEach(function(d){ locks[b.id][d]={morning:[],mid:[],night:[]};
+    ['morning','mid','night'].forEach(function(sl){ (bd[d][sl]||[]).forEach(function(a){ if(a.locked) locks[b.id][d][sl].push(a); }); }); }); });
+  var sol2=solveAll(S,{storedGrid:locks,regenDays:days});
+  days.forEach(function(d){ S.branches.forEach(function(b){ S.grid[b.id]=S.grid[b.id]||{}; S.grid[b.id][d]=cloneDay(sol2[b.id].week[d]); }); });
+  saveGrid().then(function(){ toast('สุ่มจัดใหม่แล้ว'); }); render(); }); }
+
+function materializeDay(d){ if(isGenerated(d)) return; var sol=getSol(); S.grid=S.grid||{};
+  S.branches.forEach(function(b){ S.grid[b.id]=S.grid[b.id]||{}; S.grid[b.id][d]=cloneDay(sol[b.id].week[d]); }); }
+
+// เปิด sheet แก้ไข cell (คนที่ถูกจัด)
+function openEditPerson(bid,d,slot,empId){ S.editCell={type:'person',bid:bid,d:d,slot:slot,empId:empId}; render(); }
+function openAddPerson(bid,d,slot){ S.editCell={type:'add',bid:bid,d:d,slot:slot}; render(); }
+function closeCell(){ S.editCell=null; render(); }
+function removePerson(reason,learnKind,delta){ var c=S.editCell; materializeDay(c.d);
+  var e=empById(c.empId);
+  S.grid[c.bid][c.d][c.slot]=S.grid[c.bid][c.d][c.slot].filter(function(a){return a.id!==c.empId;});
+  S.editCell=null;
+  var p=saveGrid();
+  if(learnKind){ api('sched_learn',{p_emp:c.empId,p_kind:learnKind,p_slot:learnKind==='avoid_slot'?c.slot:null,p_day:learnKind==='avoid_day'?c.d:null,p_delta:delta,p_reason:reason})
+    .then(function(){ S.learnings.push({employee_id:c.empId,kind:learnKind,slot:learnKind==='avoid_slot'?c.slot:null,day:learnKind==='avoid_day'?c.d:null,delta:delta}); render(); }); }
+  p.then(function(){ toast(learnKind?('เอา '+e.name+' ออก · จำไว้แล้ว'):('เอา '+e.name+' ออกแล้ว')); }); render(); }
+function addPerson(empId,learnKind){ var c=S.editCell; materializeDay(c.d);
+  var e=empById(empId); var pos=(e.positions&&e.positions[0])||'cook';
+  var via=(e.branchId===c.bid)?'home':'loan';
+  S.grid[c.bid][c.d][c.slot].push({id:empId,pos:pos,via:via,homeBranch:e.branchId,locked:true});
+  S.editCell=null;
+  var p=saveGrid();
+  if(learnKind){ api('sched_learn',{p_emp:empId,p_kind:'prefer_slot',p_slot:c.slot,p_day:null,p_delta:70,p_reason:'ถนัดกะนี้'})
+    .then(function(){ S.learnings.push({employee_id:empId,kind:'prefer_slot',slot:c.slot,day:null,delta:70}); render(); }); }
+  p.then(function(){ toast('เพิ่ม '+e.name+' แล้ว (ล็อกไว้)'); }); render(); }
+
+/* employee prefs */
 function addEmp(){ S.editEmp={id:null,branchId:S.activeBranch,name:'',positions:[],preferredSlots:[],off:[],loanOk:false}; S.mode='setup'; render(); }
 function editEmp(id){ var e=empById(id); S.editEmp=Object.assign({},e,{positions:(e.positions||[]).slice(),preferredSlots:(e.preferredSlots||[]).slice(),off:(e.off||[]).slice()}); S.mode='setup'; render(); }
 function closeSheet(){ S.editEmp=null; render(); }
-function setName(v){ if(S.editEmp) S.editEmp.name=v; }         // ไม่ rerender (กัน input เสีย focus)
+function setName(v){ if(S.editEmp) S.editEmp.name=v; }
 function toggleArr(field,val){ var a=(S.editEmp[field]||[]).slice(); var i=a.indexOf(val); if(i>=0)a.splice(i,1); else a.push(val); S.editEmp[field]=a; render(); }
 function pickDraftBranch(bid){ S.editEmp.branchId=bid; render(); }
 function toggleLoan(){ S.editEmp.loanOk=!S.editEmp.loanOk; render(); }
-function rpcArgs(e,over){ var m=Object.assign({},e,over||{});
-  return { p_id:m.id, p_branch:m.branchId, p_name:m.name,
-    p_positions:m.positions, p_slots:(m.preferredSlots||[]), p_off:m.off||[], p_loan:!!m.loanOk }; }
+function rpcEmpArgs(e,over){ var m=Object.assign({},e,over||{});
+  return { p_id:m.id, p_branch:m.branchId, p_name:m.name, p_positions:m.positions, p_slots:(m.preferredSlots||[]), p_off:m.off||[], p_loan:!!m.loanOk }; }
+function enableLoan(empId,who){ var e=empById(empId); if(!e) return; api('sched_emp_save',rpcEmpArgs(e,{loanOk:true})).then(function(){ e.loanOk=true; toast('ให้ '+who+' มาช่วยแล้ว'); }); }
 function saveEmp(){ var d=S.editEmp; if(!d||!d.name||!d.name.trim()||!d.positions||!d.positions.length){ toast('ใส่ชื่อและตำแหน่งก่อน'); return; }
   d.name=d.name.trim();
-  api('sched_emp_save',rpcArgs(d)).then(function(newId){
+  api('sched_emp_save',rpcEmpArgs(d)).then(function(newId){
     if(d.id){ var e=empById(d.id); if(e) Object.assign(e,{name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk}); }
-    else { S.employees.push({id:newId,name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk}); }
+    else { S.employees.push({id:newId,name:d.name,branchId:d.branchId,positions:d.positions,preferredSlots:d.preferredSlots,off:d.off,loanOk:d.loanOk,commuteGroup:null}); }
     S.editEmp=null; toast('บันทึกแล้ว');
   }).catch(function(e){ toast('บันทึกไม่สำเร็จ'); }); }
 function deleteEmp(){ var id=S.editEmp.id; if(!id){ closeSheet(); return; }
@@ -189,7 +300,7 @@ function render(){
   var dates=weekDates();
   var todayIdx=(new Date().getDay()+6)%7;
   var sd=(typeof S.selDay==='number')?S.selDay:todayIdx;
-  var sol=solveAll(S)[bid];
+  var sol=getSol()[bid];
 
   var h='';
   h+='<div style="padding:14px 20px 8px;flex:0 0 auto;">';
@@ -209,22 +320,31 @@ function render(){
   h+='</div>';
 
   if(S.editEmp) h+=renderSheet();
-  if(S.toast) h+='<div style="position:fixed;left:50%;transform:translateX(-50%);max-width:400px;width:calc(100% - 40px);bottom:22px;z-index:70;background:#1A1A2E;color:#fff;border-radius:14px;padding:13px 16px;font-size:13px;font-weight:600;text-align:center;animation:rise .24s ease;box-shadow:0 18px 40px -18px rgba(0,0,0,.6);">'+esc(S.toast)+'</div>';
-
+  if(S.editCell) h+=renderCellSheet();
+  if(S.toast) h+='<div style="position:fixed;left:50%;transform:translateX(-50%);max-width:400px;width:calc(100% - 40px);bottom:22px;z-index:80;background:#1A1A2E;color:#fff;border-radius:14px;padding:13px 16px;font-size:13px;font-weight:600;text-align:center;animation:rise .24s ease;box-shadow:0 18px 40px -18px rgba(0,0,0,.6);">'+esc(S.toast)+'</div>';
   app.innerHTML=h;
 }
 function tabBtn(label,on,fn){ return '<button onclick="'+fn+'" style="border:none;border-radius:9px;padding:7px 14px;cursor:pointer;font-weight:700;font-size:12px;background:'+(on?'#fff':'transparent')+';color:'+(on?'#1A1A2E':'#8A7E6E')+';box-shadow:'+(on?'0 3px 8px -4px rgba(0,0,0,.3)':'none')+';">'+label+'</button>'; }
+function nameChipMini(a,bid,d,slot,editable){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:'?'};
+  var loan=a.via==='loan'; var cg=e.commuteGroup;
+  var onclick = editable ? ' onclick="openEditPerson(\''+bid+'\','+d+',\''+slot+'\',\''+a.id+'\')" style="cursor:pointer;' : ' style="';
+  return '<span'+onclick+'display:inline-flex;align-items:center;gap:4px;background:'+m.bg+';color:'+m.color+';font-size:11px;font-weight:600;padding:3px 8px;border-radius:8px;">'+
+    (a.locked?svg(I_lock,9,m.color,2):'')+(loan?svg(I_arrow,9,m.color,2):'')+(cg?svg(I_car,10,m.color,1.8):'')+esc(e.name)+'</span>';
+}
 
-function personCard(a,time){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:'?'};
-  var loan = a.via==='loan';
-  var h='<div style="background:#fff;border-radius:16px;padding:8px 12px;display:flex;align-items:center;gap:11px;box-shadow:0 8px 20px -20px rgba(26,26,46,.4);">';
+function personCard(a,bid,d){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:'?'};
+  var loan=a.via==='loan'; var cg=e.commuteGroup;
+  var h='<div onclick="openEditPerson(\''+bid+'\','+d+',\''+a.slot+'\',\''+a.id+'\')" style="background:#fff;border-radius:16px;padding:8px 12px;display:flex;align-items:center;gap:11px;box-shadow:0 8px 20px -20px rgba(26,26,46,.4);cursor:pointer;">';
   h+='<span style="width:34px;height:34px;border-radius:50%;background:'+m.bg+';display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(I_person,20,m.color)+'</span>';
-  h+='<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:13.5px;">'+esc(e.name)+'</div>';
+  h+='<div style="flex:1;min-width:0;"><div style="font-weight:600;font-size:13.5px;display:flex;align-items:center;gap:5px;">'+esc(e.name)+(a.locked?svg(I_lock,12,'#9A8C7C',2):'')+'</div>';
   h+='<div style="font-size:11px;font-weight:600;color:'+m.color+';margin-top:1px;">'+m.label+'</div>';
+  var badges='';
   if(loan){ var from=(S.branches.find(function(b){return b.id===a.homeBranch;})||{}).short||'';
-    h+='<div style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#C4571E;background:#FFE9D6;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_arrow,10,'#C4571E',2)+'ช่วยจาก '+esc(from)+'</div>'; }
+    badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#C4571E;background:#FFE9D6;padding:2px 7px;border-radius:6px;margin-top:4px;margin-right:4px;">'+svg(I_arrow,10,'#C4571E',2)+'ช่วยจาก '+esc(from)+'</span>'; }
+  if(cg){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#6A4CC0;background:#EDE8FB;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_car,10,'#6A4CC0',1.8)+'คู่รถ</span>'; }
+  if(badges) h+='<div>'+badges+'</div>';
   h+='</div>';
-  h+='<span class="num" style="font-weight:700;font-size:12.5px;color:#3A4A55;background:#F1F5F8;padding:5px 10px;border-radius:9px;white-space:nowrap;flex:0 0 auto;">'+time+'</span>';
+  h+='<span class="num" style="font-weight:700;font-size:12.5px;color:#3A4A55;background:#F1F5F8;padding:5px 10px;border-radius:9px;white-space:nowrap;flex:0 0 auto;">'+SLOTM[a.slot].time+'</span>';
   h+='</div>';
   return h;
 }
@@ -234,24 +354,36 @@ function renderView(bid,branch,branchEmps,branchEmpty,dates,todayIdx,sd,sol){
     return '<div style="text-align:center;padding:60px 16px;animation:fade .3s;">'+
       '<div style="width:60px;height:60px;margin:0 auto;border-radius:19px;background:#FBEEDD;display:flex;align-items:center;justify-content:center;">'+svg(I_userplus,28,'#C2510F')+'</div>'+
       '<div style="font-weight:700;font-size:16px;margin-top:14px;">ยังไม่มีพนักงานในสาขานี้</div>'+
-      '<div style="font-size:12.5px;color:#8A7E6E;margin-top:5px;line-height:1.5;">ไปที่ "ตั้งค่า" เพิ่มพนักงาน<br>แล้วระบบจะจัดตารางให้เอง</div>'+
+      '<div style="font-size:12.5px;color:#8A7E6E;margin-top:5px;line-height:1.5;">ไปที่ "ตั้งค่า" เพิ่มพนักงาน</div>'+
       '<button onclick="goSetup()" style="margin-top:16px;border:none;border-radius:13px;background:#FF7E1D;color:#1A1A2E;font-weight:700;font-size:13.5px;padding:12px 20px;cursor:pointer;">ไปตั้งค่า →</button></div>';
   }
+  var h='';
+  // toggle วันเดียว / ทั้งสัปดาห์
+  h+='<div style="display:flex;gap:4px;background:#F1E7D8;padding:3px;border-radius:11px;margin-top:6px;">';
+  h+='<button onclick="setViewMode(\'day\')" style="flex:1;border:none;border-radius:9px;padding:7px;cursor:pointer;font-weight:700;font-size:12px;background:'+(S.viewMode==='day'?'#fff':'transparent')+';color:'+(S.viewMode==='day'?'#1A1A2E':'#8A7E6E')+';display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_cal,14,'currentColor')+'วันเดียว</button>';
+  h+='<button onclick="setViewMode(\'week\')" style="flex:1;border:none;border-radius:9px;padding:7px;cursor:pointer;font-weight:700;font-size:12px;background:'+(S.viewMode==='week'?'#fff':'transparent')+';color:'+(S.viewMode==='week'?'#1A1A2E':'#8A7E6E')+';display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_grid,14,'currentColor')+'ทั้งสัปดาห์</button>';
+  h+='</div>';
+  return h + (S.viewMode==='week' ? renderWeek(bid,branch,dates,todayIdx,sol) : renderDay(bid,branch,dates,todayIdx,sd,sol));
+}
+
+function renderDay(bid,branch,dates,todayIdx,sd,sol){
   var daySol=sol.week[sd]||{morning:[],mid:[],night:[]};
   var dayCount=daySol.morning.length+daySol.night.length+daySol.mid.length;
+  var editable=isGenerated(sd);
   var h='';
-  h+='<div style="display:flex;gap:5px;margin-top:6px;">';
-  DOW.forEach(function(dw,d){ var isSel=d===sd; var isToday=d===todayIdx;
-    h+='<button onclick="selDay('+d+')" style="flex:1;background:'+(isSel?'#FF7E1D':'#fff')+';border:'+(isSel?'1.5px solid #FF7E1D':(isToday?'1.5px solid #F2B45A':'1.5px solid #EFE2D2'))+';border-radius:14px;padding:7px 1px;text-align:center;cursor:pointer;">'+
+  h+='<div style="display:flex;gap:5px;margin-top:12px;">';
+  DOW.forEach(function(dw,d){ var isSel=d===sd; var isToday=d===todayIdx; var gen=isGenerated(d);
+    h+='<button onclick="selDay('+d+')" style="flex:1;background:'+(isSel?'#FF7E1D':'#fff')+';border:'+(isSel?'1.5px solid #FF7E1D':(isToday?'1.5px solid #F2B45A':'1.5px solid #EFE2D2'))+';border-radius:14px;padding:7px 1px;text-align:center;cursor:pointer;position:relative;">'+
       '<div style="font-size:10px;color:'+(isSel?'rgba(255,255,255,.8)':'#B0A090')+';">'+dw+'</div>'+
-      '<div class="num" style="font-weight:700;font-size:13px;color:'+(isSel?'#fff':'#1A1A2E')+';margin-top:3px;">'+dates[d].getDate()+'</div></button>'; });
+      '<div class="num" style="font-weight:700;font-size:13px;color:'+(isSel?'#fff':'#1A1A2E')+';margin-top:3px;">'+dates[d].getDate()+'</div>'+
+      (gen?'<span style="position:absolute;top:4px;right:4px;width:5px;height:5px;border-radius:50%;background:'+(isSel?'#fff':'#2C7A56')+';"></span>':'')+'</button>'; });
   h+='</div>';
   h+='<div style="background:linear-gradient(150deg,#7AD6E5,#4CC2D8);border-radius:22px;padding:13px 16px;margin-top:13px;color:#1A1A2E;box-shadow:0 16px 30px -22px rgba(26,26,46,.6);">';
   h+='<div style="display:flex;align-items:center;justify-content:space-between;">';
   h+='<span style="font-size:13px;font-weight:600;background:rgba(255,255,255,.26);padding:4px 12px;border-radius:20px;">'+DOWF[sd]+' '+dates[sd].getDate()+'</span>';
-  h+='<span style="font-size:11px;font-weight:700;background:#fff;color:#2D7DA6;padding:5px 12px;border-radius:20px;">'+esc(branch.short)+'</span></div>';
+  h+='<span style="font-size:11px;font-weight:700;background:#fff;color:#2D7DA6;padding:5px 12px;border-radius:20px;">'+(editable?'จัดแล้ว':'พรีวิว')+'</span></div>';
   h+='<div style="display:flex;align-items:baseline;gap:8px;margin-top:8px;"><span class="num" style="font-weight:800;font-size:26px;line-height:1;">'+dayCount+'</span><span style="font-size:14px;font-weight:600;">คนเข้างาน</span></div>';
-  h+='<div style="font-size:12.5px;opacity:.82;margin-top:3px;">กะเช้า '+daySol.morning.length+' คน · กะดึก '+daySol.night.length+' คน</div></div>';
+  h+='<div style="font-size:12.5px;opacity:.82;margin-top:3px;">กะเช้า '+daySol.morning.length+' คน · กะดึก '+daySol.night.length+' คน'+(daySol.mid.length?(' · กะกลาง '+daySol.mid.length+' คน'):'')+'</div></div>';
   var dShort=sol.coverShort.filter(function(c){return c.d===sd;});
   if(dShort.length){ var txt='วันนี้ขาด '+dShort.map(function(c){return POSM[c.pos].label+' '+SLOTM[c.slot].label;}).join(' · ');
     h+='<div style="display:flex;align-items:center;gap:8px;background:#FBE6DE;border-radius:13px;padding:10px 13px;margin-top:12px;">'+svg(I_alert,15,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">'+esc(txt)+'</span></div>'; }
@@ -259,53 +391,111 @@ function renderView(bid,branch,branchEmps,branchEmpty,dates,todayIdx,sd,sol){
   if(daySug.length){
     h+='<div style="background:#fff;border:1.5px solid #E7DAF5;border-radius:16px;padding:12px 14px;margin-top:11px;box-shadow:0 10px 24px -22px rgba(26,26,46,.4);">';
     h+='<div style="display:flex;align-items:center;gap:7px;margin-bottom:9px;">'+svg(I_users,15,'#6A4CC0',2)+'<span style="font-size:12px;font-weight:700;color:#6A4CC0;">ดึงคนจากสาขาอื่นมาช่วยได้</span></div>';
-    h+='<div style="display:flex;flex-direction:column;gap:8px;">';
-    daySug.forEach(function(s){ h+='<div style="display:flex;align-items:center;gap:10px;"><div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;">'+esc(s.name)+'</div><div style="font-size:10.5px;color:#9A8C7C;">'+esc(s.from)+' · ว่างวันนี้ · ทำ '+POSM[s.pos].label+' '+SLOTM[s.slot].label+' ได้</div></div>'+
+    daySug.forEach(function(s){ h+='<div style="display:flex;align-items:center;gap:10px;margin-top:6px;"><div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;">'+esc(s.name)+'</div><div style="font-size:10.5px;color:#9A8C7C;">'+esc(s.from)+' · ทำ '+POSM[s.pos].label+' '+SLOTM[s.slot].label+' ได้</div></div>'+
       '<button onclick="enableLoan(\''+s.empId+'\',\''+esc(s.name)+'\')" style="border:none;border-radius:11px;background:#6A4CC0;color:#fff;font-weight:700;font-size:11.5px;padding:8px 13px;cursor:pointer;white-space:nowrap;flex:0 0 auto;">ให้มาช่วย</button></div>'; });
-    h+='</div></div>';
+    h+='</div>';
   }
   var offToday=(sol.offByDay&&sol.offByDay[sd])||[];
   if(offToday.length){ h+='<div style="display:flex;align-items:flex-start;gap:9px;background:#F4ECE0;border-radius:13px;padding:10px 13px;margin-top:11px;">'+svg(I_cal2,15,'#9A7A55',2)+'<span style="flex:1;font-size:11.5px;color:#7A6A57;line-height:1.5;"><span style="font-weight:700;">หยุดวันนี้:</span> '+esc(offToday.join(' · '))+'</span></div>'; }
-  if(daySol.morning.length){
-    h+=sectionHead('#F2B45A','กะเช้า','08:00–18:00 · '+daySol.morning.length+' คน');
-    h+='<div style="display:flex;flex-direction:column;gap:8px;">'+daySol.morning.map(function(a){return personCard(a,'08:00–18:00');}).join('')+'</div>';
-  }
-  if(daySol.night.length){
-    h+=sectionHead('#6A5AC0','กะดึก','17:00–03:00 · '+daySol.night.length+' คน');
-    h+='<div style="display:flex;flex-direction:column;gap:8px;">'+daySol.night.map(function(a){return personCard(a,'17:00–03:00');}).join('')+'</div>';
-  }
-  if(!daySol.morning.length && !daySol.night.length){
-    h+='<div style="text-align:center;padding:34px 16px;color:#9A8C7C;font-size:13px;">ไม่มีคนเข้ากะวันนี้</div>';
-  }
-  h+='<div style="text-align:center;margin-top:18px;"><button onclick="regenerate()" style="border:none;background:none;cursor:pointer;font-weight:700;font-size:12px;color:#C77A1B;text-decoration:underline;">จัดตารางใหม่</button></div><div style="height:8px;"></div>';
+  ['morning','mid','night'].forEach(function(slot){
+    var list=daySol[slot]||[]; if(!list.length && slot==='mid') return;
+    if(!list.length && !editable) return;
+    h+='<div style="display:flex;align-items:center;gap:9px;margin:14px 2px 8px;"><span style="width:9px;height:9px;border-radius:50%;background:'+SLOTM[slot].dot+';flex:0 0 auto;"></span><span style="font-weight:700;font-size:14px;">กะ'+SLOTM[slot].label+'</span><span style="font-size:12px;color:#5A7488;">'+SLOTM[slot].time+' · '+list.length+' คน</span></div>';
+    h+='<div style="display:flex;flex-direction:column;gap:8px;">'+list.map(function(a){ a.slot=slot; return personCard(a,bid,sd); }).join('');
+    if(editable) h+='<button onclick="openAddPerson(\''+bid+'\','+sd+',\''+slot+'\')" style="border:1.5px dashed #E2D3C0;background:#fff;border-radius:13px;padding:9px;cursor:pointer;font-weight:700;font-size:12px;color:#9A7A55;display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_plus,14,'#9A7A55',2.2)+'เพิ่มคนกะ'+SLOTM[slot].label+'</button>';
+    h+='</div>';
+  });
+  if(!editable){ h+='<div style="text-align:center;margin-top:16px;font-size:11.5px;color:#9A8C7C;">นี่คือพรีวิว — กด "จัดตารางอัตโนมัติ" ในแท็บตั้งค่าเพื่อจัดจริงและแก้ไขได้</div>'; }
+  h+='<div style="height:8px;"></div>';
   return h;
 }
-function sectionHead(dot,label,sub){ return '<div style="display:flex;align-items:center;gap:9px;margin:14px 2px 8px;"><span style="width:9px;height:9px;border-radius:50%;background:'+dot+';flex:0 0 auto;"></span><span style="font-weight:700;font-size:14px;">'+label+'</span><span style="font-size:12px;color:#5A7488;">'+sub+'</span></div>'; }
+
+function renderWeek(bid,branch,dates,todayIdx,sol){
+  var h='<div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">';
+  for(var d=0;d<7;d++){ (function(d){
+    var dd=sol.week[d]||{morning:[],mid:[],night:[]};
+    var gen=isGenerated(d); var isToday=d===todayIdx;
+    var dShort=sol.coverShort.filter(function(c){return c.d===d;});
+    h+='<div onclick="selDay('+d+');setViewMode(\'day\')" style="background:#fff;border-radius:14px;padding:10px 12px;cursor:pointer;box-shadow:0 8px 20px -20px rgba(26,26,46,.4);border:1px solid '+(isToday?'#F2B45A':'#F3EADD')+';">';
+    h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">';
+    h+='<span style="font-weight:700;font-size:13px;">'+DOWF[d]+' '+dates[d].getDate()+(isToday?' <span style="font-size:9.5px;color:#C77A1B;background:#FFF1D6;padding:1px 6px;border-radius:6px;">วันนี้</span>':'')+'</span>';
+    h+='<span style="font-size:10.5px;font-weight:700;color:'+(gen?'#2C7A56':'#9A8C7C')+';">'+(gen?'จัดแล้ว':'พรีวิว')+(dShort.length?(' · <span style="color:#C0392B;">ขาด '+dShort.length+'</span>'):'')+'</span>';
+    h+='</div>';
+    ['morning','night'].forEach(function(slot){ var list=dd[slot]||[];
+      h+='<div style="display:flex;align-items:flex-start;gap:7px;padding:3px 0;">'+
+        '<span style="width:18px;height:18px;border-radius:5px;background:'+SLOTM[slot].dot+'22;display:flex;align-items:center;justify-content:center;flex:0 0 auto;margin-top:1px;"><span style="width:7px;height:7px;border-radius:50%;background:'+SLOTM[slot].dot+';"></span></span>'+
+        '<div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;">'+(list.length?list.map(function(a){ a.slot=slot; return nameChipMini(a,bid,d,slot,false); }).join(''):'<span style="font-size:10.5px;color:#C0B4A2;padding-top:2px;">—</span>')+'</div></div>';
+    });
+    h+='</div>';
+  })(d); }
+  h+='</div><div style="height:8px;"></div>';
+  return h;
+}
 
 function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
   var h='';
-  h+='<button onclick="regenerate()" style="width:100%;margin-top:6px;border:none;border-radius:16px;background:#FF7E1D;color:#1A1A2E;font-weight:700;font-size:15px;padding:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:0 16px 30px -20px rgba(255,126,29,.7);">'+svg(I_refresh,19,'#1A1A2E',2)+'จัดตารางอัตโนมัติ</button>';
+  var plan=planOf(bid); var pk=plan.plan_key||'lean';
+  // แผนกำลังคน
+  h+='<div style="margin-top:8px;"><div style="font-weight:700;font-size:14px;color:#9A7A55;margin:2px 2px 9px;">แผนกำลังคน · '+esc(branch.short)+'</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">';
+  PLANS.forEach(function(p){ var on=pk===p.key;
+    h+='<button onclick="setPlan(\''+bid+'\',\''+p.key+'\')" style="text-align:left;border:1.5px solid '+(on?'#FF7E1D':'#EFD9CF')+';background:'+(on?'#FFF3E6':'#fff')+';border-radius:14px;padding:11px 12px;cursor:pointer;">'+
+      '<div style="font-weight:700;font-size:13.5px;color:'+(on?'#C2510F':'#1A1A2E')+';">'+p.label+'</div><div style="font-size:10.5px;color:#9A8C7C;margin-top:2px;">'+p.desc+'</div></button>'; });
+  h+='</div></div>';
+
+  // จัดตารางอัตโนมัติ (เลือกช่วงวัน)
+  h+='<div style="margin-top:16px;">';
+  h+='<button onclick="toggleGen()" style="width:100%;border:none;border-radius:16px;background:#FF7E1D;color:#1A1A2E;font-weight:700;font-size:15px;padding:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:0 16px 30px -20px rgba(255,126,29,.7);">'+svg(I_refresh,19,'#1A1A2E',2)+'จัดตารางอัตโนมัติ</button>';
+  if(S.genOpen){
+    var dates=weekDates();
+    h+='<div style="background:#fff;border:1.5px solid #EFD9CF;border-radius:16px;padding:13px 14px;margin-top:9px;box-shadow:0 10px 24px -22px rgba(26,26,46,.4);">';
+    h+='<div style="font-size:12px;font-weight:700;color:#7A6A57;margin-bottom:8px;">เลือกวันที่จะจัด</div>';
+    h+='<div style="display:flex;gap:4px;">';
+    DOW.forEach(function(dw,d){ var on=S.genDays.indexOf(d)>=0;
+      h+='<button onclick="toggleGenDay('+d+')" style="flex:1;min-width:0;border:1.5px solid '+(on?'#FF7E1D':'#EFD9CF')+';background:'+(on?'#FFF3E6':'#fff')+';color:'+(on?'#C2510F':'#8A7E6E')+';border-radius:10px;padding:8px 0;cursor:pointer;font-weight:700;font-size:11px;">'+dw+'<div class="num" style="font-size:10px;font-weight:600;margin-top:1px;">'+dates[d].getDate()+'</div></button>'; });
+    h+='</div>';
+    h+='<div style="display:flex;gap:8px;margin-top:11px;"><button onclick="genAll()" style="flex:0 0 auto;border:1.5px solid #EFD9CF;background:#fff;border-radius:11px;padding:10px 14px;cursor:pointer;font-weight:700;font-size:12.5px;color:#7A6A57;">ทั้งสัปดาห์</button>'+
+      '<button onclick="runGenerate()" style="flex:1;border:none;border-radius:11px;background:#2C7A56;color:#fff;font-weight:700;font-size:13.5px;padding:10px;cursor:pointer;">จัด '+S.genDays.length+' วัน</button></div>';
+    h+='<div style="font-size:10.5px;color:#9A8C7C;margin-top:8px;line-height:1.4;">จัดแล้วแก้มือได้ในแท็บ "ดูตาราง" (แตะที่คน) · คนที่ล็อก '+svg(I_lock,9,'#9A8C7C',2)+' จะไม่ถูกย้ายเวลาจัดใหม่</div>';
+    h+='</div>';
+  }
+  h+='<button onclick="reshuffle()" style="width:100%;margin-top:8px;border:none;background:none;cursor:pointer;font-weight:700;font-size:12px;color:#C77A1B;text-decoration:underline;">สุ่มจัดใหม่ (สลับคน)</button>';
+  h+='</div>';
+
+  // banner ผล
   if(!branchEmpty){
     var restBad=sol.noRest.length>0, coverBad=sol.shortDays.length>0;
     h+='<div style="margin-top:13px;display:flex;flex-direction:column;gap:8px;">';
     if(!restBad) h+='<div style="display:flex;align-items:center;gap:8px;background:#DCEFE4;border-radius:13px;padding:10px 13px;">'+svg(I_check,15,'#2C7A56',2.2)+'<span style="font-size:11.5px;color:#235C40;font-weight:600;">ทุกคนได้หยุด ≥1 วัน · ไม่มีใครทำเกิน 6 วัน</span></div>';
-    else h+='<div style="display:flex;align-items:center;gap:8px;background:#FBE6DE;border-radius:13px;padding:10px 13px;">'+svg(I_alert,15,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">'+esc(sol.noRest.join(' · '))+' — ยังไม่ได้หยุดสัปดาห์นี้</span></div>';
-    if(coverBad){ var ct='คนไม่พอ '+sol.shortDays.length+' วัน — วัน'+sol.shortDays.slice().sort(function(a,b){return a-b;}).map(function(x){return DOW[x];}).join(',')+(sol.loaners.length?(' · ดึงสาขาอื่นช่วยแล้ว '+sol.loaners.length+' กะ'):'');
+    else h+='<div style="display:flex;align-items:center;gap:8px;background:#FBE6DE;border-radius:13px;padding:10px 13px;">'+svg(I_alert,15,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">'+esc(sol.noRest.join(' · '))+' — ยังไม่ได้หยุด</span></div>';
+    if(coverBad){ var ct='คนไม่พอ '+sol.shortDays.length+' วัน — วัน'+sol.shortDays.slice().sort(function(a,b){return a-b;}).map(function(x){return DOW[x];}).join(',')+(sol.loaners.length?(' · ดึงสาขาอื่นช่วย '+sol.loaners.length+' กะ'):'');
       h+='<div style="display:flex;align-items:center;gap:8px;background:#FFF1D6;border-radius:13px;padding:10px 13px;">'+svg(I_info,15,'#A06A12',2)+'<span style="font-size:11.5px;color:#8A5A12;font-weight:600;">'+esc(ct)+'</span></div>'; }
     h+='</div>';
   }
+  // learnings สรุป
+  var myLearn=S.learnings.filter(function(l){ var e=empById(l.employee_id); return e&&e.branchId===bid; });
+  if(myLearn.length){
+    h+='<div style="background:#fff;border:1.5px solid #E7DAF5;border-radius:16px;padding:12px 14px;margin-top:13px;">';
+    h+='<div style="display:flex;align-items:center;gap:7px;"><span style="color:#6A4CC0;">'+svg(I_bulb,15,'#6A4CC0')+'</span><span style="font-size:12.5px;font-weight:700;color:#6A4CC0;">ระบบเรียนรู้จากที่คุณแก้ ('+myLearn.length+')</span></div>';
+    h+='<div style="font-size:10.5px;color:#8A7BB5;margin-top:6px;line-height:1.5;">'+myLearn.slice(0,5).map(function(l){ var e=empById(l.employee_id);
+      var t=e?e.name:''; if(l.kind==='avoid_slot') t+=' เลี่ยงกะ'+(SLOTM[l.slot]?SLOTM[l.slot].label:l.slot);
+      else if(l.kind==='prefer_slot') t+=' ถนัดกะ'+(SLOTM[l.slot]?SLOTM[l.slot].label:l.slot);
+      else if(l.kind==='avoid_day') t+=' เลี่ยงวัน'+DOWF[l.day]; return esc(t); }).join(' · ')+'</div></div>';
+  }
+
+  // suggestions setup
   var sugByEmp={}; sol.suggestions.forEach(function(su){ if(!sugByEmp[su.empId]) sugByEmp[su.empId]={empId:su.empId,name:su.name,from:su.from,slots:{},days:{}}; sugByEmp[su.empId].slots[POSM[su.pos].label]=1; sugByEmp[su.empId].days[su.d]=1; });
   var setupSug=Object.keys(sugByEmp).map(function(k){ var x=sugByEmp[k]; return {empId:x.empId,name:x.name,from:x.from,detail:'ทำ '+Object.keys(x.slots).join('/')+' ได้ · ช่วยได้ '+Object.keys(x.days).length+' วัน'}; });
   if(setupSug.length){
-    h+='<div style="background:#fff;border:1.5px solid #E7DAF5;border-radius:16px;padding:13px 15px;margin-top:13px;box-shadow:0 10px 24px -22px rgba(26,26,46,.4);">';
-    h+='<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px;">'+svg(I_users,16,'#6A4CC0',1.9)+'<span style="font-size:13px;font-weight:700;color:#6A4CC0;">คนสาขาอื่นที่มาช่วยได้</span></div>';
-    h+='<div style="font-size:11px;color:#8A7BB5;margin-bottom:10px;line-height:1.45;">ติ๊ก "ให้มาช่วย" แล้วระบบจะจัดเข้าตารางวันที่ขาดให้อัตโนมัติ</div>';
-    h+='<div style="display:flex;flex-direction:column;gap:9px;">';
-    setupSug.forEach(function(s){ h+='<div style="display:flex;align-items:center;gap:10px;"><span style="width:34px;height:34px;border-radius:11px;background:#EDE8FB;display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(I_person,18,'#6A4CC0')+'</span>'+
-      '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;">'+esc(s.name)+'</div><div style="font-size:10.5px;color:#9A8C7C;">'+esc(s.from)+' · '+esc(s.detail)+'</div></div>'+
-      '<button onclick="enableLoan(\''+s.empId+'\',\''+esc(s.name)+'\')" style="border:none;border-radius:11px;background:#6A4CC0;color:#fff;font-weight:700;font-size:11.5px;padding:8px 13px;cursor:pointer;white-space:nowrap;flex:0 0 auto;">ให้มาช่วย</button></div>'; });
-    h+='</div></div>';
+    h+='<div style="background:#fff;border:1.5px solid #E7DAF5;border-radius:16px;padding:13px 15px;margin-top:13px;">';
+    h+='<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px;">'+svg(I_users,16,'#6A4CC0',1.9)+'<span style="font-size:13px;font-weight:700;color:#6A4CC0;">คนสาขาอื่นที่มาช่วยได้</span></div>';
+    setupSug.forEach(function(s){ h+='<div style="display:flex;align-items:center;gap:10px;margin-top:7px;"><span style="width:32px;height:32px;border-radius:10px;background:#EDE8FB;display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(I_person,17,'#6A4CC0')+'</span>'+
+      '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:12.5px;">'+esc(s.name)+'</div><div style="font-size:10px;color:#9A8C7C;">'+esc(s.from)+' · '+esc(s.detail)+'</div></div>'+
+      '<button onclick="enableLoan(\''+s.empId+'\',\''+esc(s.name)+'\')" style="border:none;border-radius:11px;background:#6A4CC0;color:#fff;font-weight:700;font-size:11px;padding:7px 12px;cursor:pointer;white-space:nowrap;flex:0 0 auto;">ให้มาช่วย</button></div>'; });
+    h+='</div>';
   }
+
+  // พนักงาน
   h+='<div style="display:flex;align-items:center;justify-content:space-between;margin:18px 2px 10px;"><span style="font-weight:700;font-size:14px;color:#9A7A55;">พนักงาน · '+esc(branch.short)+'</span>'+
     '<button onclick="addEmp()" style="border:1.5px solid #EFD9CF;background:#fff;border-radius:11px;padding:6px 12px;cursor:pointer;display:flex;align-items:center;gap:5px;font-weight:700;font-size:12px;color:#C77A1B;">'+svg(I_plus,14,'#C77A1B',2.4)+'เพิ่มคน</button></div>';
   if(branchEmpty){ h+='<div style="background:#fff;border:1.5px dashed #E2D3C0;border-radius:16px;padding:30px 18px;text-align:center;color:#9A8C7C;font-size:13px;">ยังไม่มีพนักงาน — กด "เพิ่มคน"</div>'; return h; }
@@ -316,13 +506,53 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
     var offText=(e.off&&e.off.length)?e.off.slice().sort(function(a,b){return a-b;}).map(function(d){return DOW[d];}).join(','):'—';
     h+='<div onclick="editEmp(\''+e.id+'\')" style="background:#fff;border-radius:16px;padding:13px 15px;cursor:pointer;box-shadow:0 10px 24px -22px rgba(26,26,46,.5);border:1px solid #F3EADD;">'+
       '<div style="display:flex;align-items:center;gap:11px;"><span style="width:38px;height:38px;border-radius:12px;background:'+m.bg+';display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(I_person,20,m.color)+'</span>'+
-      '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:14.5px;">'+esc(e.name)+(e.loanOk?' <span style="font-size:9.5px;color:#6A4CC0;background:#EDE8FB;padding:1px 6px;border-radius:5px;font-weight:700;">ช่วยสาขาอื่น</span>':'')+'</div><div style="font-size:11px;color:#9A8C7C;margin-top:1px;">'+esc(posText)+'</div></div>'+
+      '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;">'+esc(e.name)+
+        (e.loanOk?' <span style="font-size:9.5px;color:#6A4CC0;background:#EDE8FB;padding:1px 6px;border-radius:5px;font-weight:700;">ช่วยสาขาอื่น</span>':'')+
+        (e.commuteGroup?' <span style="font-size:9.5px;color:#6A4CC0;background:#EDE8FB;padding:1px 6px;border-radius:5px;font-weight:700;display:inline-flex;align-items:center;gap:2px;">'+svg(I_car,10,'#6A4CC0',1.8)+'คู่รถ</span>':'')+
+        '</div><div style="font-size:11px;color:#9A8C7C;margin-top:1px;">'+esc(posText)+'</div></div>'+
       svg(I_chev,16,'#C7BEB0',2.2)+'</div>'+
       '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">'+
       '<span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:#5A7488;background:#EEF4F8;padding:4px 9px;border-radius:8px;">'+svg(I_clock,11,'#5A7488',2)+esc(slotText)+'</span>'+
       '<span style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:#9A7A55;background:#F6EFE4;padding:4px 9px;border-radius:8px;">'+svg(I_cal,11,'#9A7A55',2)+'หยุด '+esc(offText)+'</span></div></div>'; });
   h+='</div><div style="height:8px;"></div>';
   return h;
+}
+
+/* sheet แก้ไข cell (คน/เพิ่ม) พร้อมเหตุผล → เรียนรู้ */
+function sheetWrap(inner){
+  return '<div onclick="closeCell()" style="position:fixed;inset:0;max-width:440px;margin:0 auto;z-index:70;background:rgba(26,26,46,.45);display:flex;flex-direction:column;justify-content:flex-end;animation:fade .2s ease;">'+
+    '<div onclick="event.stopPropagation()" class="scr" style="background:#FFF6EC;border-radius:30px 30px 0 0;padding:10px 20px calc(20px + env(safe-area-inset-bottom));max-height:88%;overflow-y:auto;animation:rise .26s cubic-bezier(.2,.9,.3,1);">'+
+    '<div style="width:42px;height:5px;border-radius:3px;background:#E2D3C0;margin:6px auto 15px;"></div>'+inner+
+    '<button onclick="closeCell()" style="width:100%;margin-top:9px;border:none;background:none;padding:10px;cursor:pointer;font-weight:600;font-size:12.5px;color:#9A8C7C;">ปิด</button><div style="height:6px;"></div></div></div>';
+}
+function renderCellSheet(){
+  var c=S.editCell;
+  if(c.type==='person'){ var e=empById(c.empId)||{name:'?'};
+    var h='<div style="font-weight:700;font-size:18px;">'+esc(e.name)+' · กะ'+SLOTM[c.slot].label+' '+DOWF[c.d]+'</div>';
+    h+='<div style="font-size:12px;color:#9A8C7C;margin-top:3px;">เอาออกจากกะนี้ — เลือกเหตุผลเพื่อให้ระบบจัดดีขึ้นครั้งหน้า</div>';
+    h+='<div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;">';
+    h+='<button onclick="removePerson(\'ไม่ถนัดกะนี้\',\'avoid_slot\',-70)" style="border:1.5px solid #EFD9CF;background:#fff;border-radius:13px;padding:13px 14px;cursor:pointer;text-align:left;font-weight:600;font-size:13.5px;color:#1A1A2E;">ไม่ถนัด/ไม่ชอบกะนี้ <span style="font-size:10.5px;color:#6A4CC0;">· จำไว้ว่าเลี่ยงกะนี้</span></button>';
+    h+='<button onclick="removePerson(\'ติดธุระวันนี้\',\'avoid_day\',-80)" style="border:1.5px solid #EFD9CF;background:#fff;border-radius:13px;padding:13px 14px;cursor:pointer;text-align:left;font-weight:600;font-size:13.5px;color:#1A1A2E;">ติดธุระ/ลาวันนี้ <span style="font-size:10.5px;color:#6A4CC0;">· จำไว้ว่าเลี่ยงวันนี้</span></button>';
+    h+='<button onclick="removePerson(\'คนเยอะเกิน\',null,0)" style="border:1.5px solid #EFD9CF;background:#fff;border-radius:13px;padding:13px 14px;cursor:pointer;text-align:left;font-weight:600;font-size:13.5px;color:#1A1A2E;">คนเยอะเกินไป <span style="font-size:10.5px;color:#9A8C7C;">· แค่เอาออก ไม่จำ</span></button>';
+    h+='<button onclick="removePerson(\'อื่นๆ\',null,0)" style="border:1.5px solid #EFD9CF;background:#fff;border-radius:13px;padding:13px 14px;cursor:pointer;text-align:left;font-weight:600;font-size:13.5px;color:#1A1A2E;">เหตุผลอื่น</button>';
+    h+='</div>';
+    return sheetWrap(h);
+  }
+  // add
+  var taken={}; ['morning','mid','night'].forEach(function(sl){ ((S.grid[c.bid]&&S.grid[c.bid][c.d]&&S.grid[c.bid][c.d][sl])||[]).forEach(function(a){ taken[a.id]=1; }); });
+  // ถ้ายังไม่ materialize ให้ดูจาก getSol
+  if(!isGenerated(c.d)){ var sol=getSol(); ['morning','mid','night'].forEach(function(sl){ (sol[c.bid].week[c.d][sl]||[]).forEach(function(a){ taken[a.id]=1; }); }); }
+  var cands=S.employees.filter(function(e){ return (e.branchId===c.bid || e.loanOk) && !taken[e.id] && (e.off||[]).indexOf(c.d)<0; });
+  var h='<div style="font-weight:700;font-size:18px;">เพิ่มคน · กะ'+SLOTM[c.slot].label+' '+DOWF[c.d]+'</div>';
+  h+='<div style="font-size:12px;color:#9A8C7C;margin-top:3px;">คนที่ว่างวันนี้ (แตะเพื่อเพิ่ม · ล็อกอัตโนมัติ)</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:7px;margin-top:12px;">';
+  if(!cands.length) h+='<div style="color:#9A8C7C;font-size:13px;padding:10px 0;">ไม่มีคนว่างเพิ่มได้แล้ว</div>';
+  cands.forEach(function(e){ var m=POSM[(e.positions&&e.positions[0])||'cook']||POSM.cook; var loan=e.branchId!==c.bid;
+    h+='<div style="display:flex;align-items:center;gap:9px;padding:5px 0;"><span style="width:32px;height:32px;border-radius:10px;background:'+m.bg+';display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(I_person,17,m.color)+'</span>'+
+      '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;">'+esc(e.name)+(loan?' <span style="font-size:9px;color:#C4571E;background:#FFE9D6;padding:1px 5px;border-radius:4px;">ข้ามสาขา</span>':'')+'</div><div style="font-size:10px;color:#9A8C7C;">'+(e.positions||[]).map(function(p){return POSM[p]?POSM[p].label:p;}).join('/')+'</div></div>'+
+      '<button onclick="addPerson(\''+e.id+'\',\'prefer_slot\')" style="border:none;border-radius:10px;background:#2C7A56;color:#fff;font-weight:700;font-size:11.5px;padding:8px 13px;cursor:pointer;flex:0 0 auto;">เพิ่ม</button></div>'; });
+  h+='</div>';
+  return sheetWrap(h);
 }
 
 function renderSheet(){
@@ -359,7 +589,7 @@ function renderSheet(){
   var lon=!!d.loanOk;
   h+='<button onclick="toggleLoan()" style="width:100%;margin-top:16px;border:1.5px solid '+(lon?'#C77A1B':'#EFD9CF')+';background:'+(lon?'#FFF3E6':'#fff')+';border-radius:14px;padding:13px 14px;cursor:pointer;display:flex;align-items:center;gap:11px;text-align:left;">'+
     '<span style="width:34px;height:34px;border-radius:10px;background:#EDE8FB;display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+svg(I_arrow,18,'#6A4CC0')+'</span>'+
-    '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13.5px;color:'+(lon?'#C2510F':'#8A7E6E')+';">รับไปช่วยสาขาอื่นได้</div><div style="font-size:10.5px;color:#9A8C7C;margin-top:1px;">ระบบจะดึงไปช่วยสาขาที่คนไม่พอ (วันที่ว่าง)</div></div>'+
+    '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13.5px;color:'+(lon?'#C2510F':'#8A7E6E')+';">รับไปช่วยสาขาอื่นได้</div><div style="font-size:10.5px;color:#9A8C7C;margin-top:1px;">ระบบจะดึงไปช่วยสาขาที่คนไม่พอ</div></div>'+
     '<span style="width:26px;height:26px;border-radius:8px;border:2px solid '+(lon?'#C77A1B':'#EFD9CF')+';background:'+(lon?'#FFF3E6':'#fff')+';display:flex;align-items:center;justify-content:center;flex:0 0 auto;">'+(lon?svg(I_check,15,'#C2510F',3):'')+'</span></button>';
   h+='<button onclick="saveEmp()" style="width:100%;margin-top:20px;border:none;border-radius:16px;background:'+(canSave?'#FF7E1D':'#F0E2D2')+';color:'+(canSave?'#1A1A2E':'#C0B4A2')+';font-weight:700;font-size:15px;padding:15px;cursor:'+(canSave?'pointer':'not-allowed')+';">บันทึก</button>';
   h+='<button onclick="closeSheet()" style="width:100%;margin-top:9px;border:none;background:none;padding:8px;cursor:pointer;font-weight:600;font-size:12.5px;color:#9A8C7C;">ยกเลิก</button><div style="height:6px;"></div>';
