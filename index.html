@@ -155,7 +155,7 @@ function solveAll(state, opts){
     for(var t=0;t<8;t++){
       var st2=Object.assign({},state,{seed:(state.seed||1)+t*101});
       var r=solveAll(st2, Object.assign({},opts,{_single:true}));
-      var cost=(r._underTarget||0)*8;
+      var cost=(r._underTarget||0)*8 + (r._paidLoans||0)*0.5;   // ครบมาก่อน แล้วค่อยประหยัดเที่ยวรถ
       Object.keys(r).forEach(function(bid){ if(bid.charAt(0)==='_') return;
         cost += r[bid].coverShort.length*10 + r[bid].peakShort.length*3 + r[bid].unscheduled.length*30; });
       if(cost<bestCost){ bestCost=cost; best=r; }
@@ -249,7 +249,8 @@ function solveAll(state, opts){
     s += (e.home===slot)?25:0;
     if(e.off.indexOf(d)>=0) s-=150;                    // วันหยุดที่ขอ — เลี่ยงถ้ามีคนอื่น แต่หน้างานมาก่อน
     s -= 25*workDays(e.id) + 2*(gHours[e.id]||0);      // สมดุล: เกลี่ยวัน+ชั่วโมง
-    if(loan){ s -= 600 + 100*(gLoan[e.id]||0);   // ยืมเฉพาะจำเป็น (ค่ารถ) — matching ยังการันตีเติมครบเท่าเดิม
+    if(loan && e.cg && brName[bid]==='สาทร'){ s += 40; }   // บาส/จ๋าพักอยู่สาทร — ช่วยสาทรฟรีไม่มีค่ารถ เลือกก่อนดึงพญาไท
+    else if(loan){ s -= 600 + 100*(gLoan[e.id]||0);   // ยืมเฉพาะจำเป็น (ค่ารถ) — matching ยังการันตีเติมครบเท่าเดิม
       // รวมทริป (ค่ารถรอบเดียว): เพื่อนสาขาเดียวกันไปสาขานี้วันเดียวกัน → เวลาเริ่มตรงกัน = นั่งรถมาด้วยกัน
       var trips=gTrip[e.branchId+'|'+bid+'|'+d]||[];
       if(trips.indexOf(SLOT_START[slot])>=0) s+=400; else if(trips.length) s-=200; }
@@ -469,6 +470,10 @@ function solveAll(state, opts){
       unscheduled:unscheduled, fair:fair, loaners:loanersReal, suggestions:suggestions, offByDay:offByDay, offMoved:offMoved };
   });
   result._underTarget=underTarget;
+  // นับยืมที่ "มีค่ารถจริง" (ไม่นับบาส/จ๋าไปสาทร — บ้านอยู่นั่น) — ใช้เลือก seed ที่ประหยัดสุดในบรรดาที่จัดครบเท่ากัน
+  var paid=0; branches.forEach(function(b){ for(var d=0;d<7;d++) SLOTS.forEach(function(sl){ weeks[b.id][d][sl].forEach(function(a){
+    if(a.via==='loan'){ var e=Emap[a.id]; if(!(e&&e.cg&&brName[b.id]==='สาทร')) paid++; } }); }); });
+  result._paidLoans=paid;
   return result;
 }
 
