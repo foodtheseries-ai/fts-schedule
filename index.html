@@ -77,12 +77,13 @@ var PLAN_BY_KEY={}; PLANS.forEach(function(p){ PLAN_BY_KEY[p.key]=p; });
 // → จ แรงสุดทุกสาขา · พฤ+ศ เบาสุด (13 สัปดาห์ยืนยัน — ต่างจากหน้าต่าง 30 วันที่หลอกว่า พ เบา)
 // พีคชั่วโมง: 10-12 หลัก + 17-20 รอง เหมือนกันทุกวัน → กะกลาง 10-20 ครอบพอดี
 var PEAK_DAYS={0:1,1:1,2:1,5:1,6:1};
-// ยอดขายเฉลี่ยจริง 13 สัปดาห์ (7 เม.ย.–7 ก.ค. 2026 จาก FoodStory): hour=บาท/ชม./วัน · dow=บาท/วัน (จ..อา)
-// ใช้โชว์แนวโน้มออเดอร์เทียบกับตารางคน — ควรอัปเดตทุก 1-2 เดือน
+// ยอดขายเฉลี่ยจริง 2 สัปดาห์ล่าสุด (24 มิ.ย.–7 ก.ค. 2026 จาก FoodStory): hour=บาท/ชม./วัน · dow=บาท/วัน (จ..อา)
+// ใช้โชว์แนวโน้มออเดอร์เทียบกับตารางคน — ซันขอ 2 สัปดาห์ล่าสุดพอ (สดกว่า) · ควรอัปเดตทุก 1-2 สัปดาห์
+var SALES_TREND_LABEL='2 สัปดาห์ล่าสุด';
 var SALES_TREND={
-  'สาทร':{hour:[1590,1277,661,0,0,0,0,0,49,1232,2985,3262,2379,1800,1498,1441,1731,2528,3084,3183,2648,2351,2342,2184],dow:[40970,42210,39192,37319,33548,35292,39034]},
-  'พญาไท':{hour:[1662,1512,640,0,0,0,0,0,125,1836,3127,3844,2956,2143,1591,1436,1891,2359,2709,2508,2246,2032,1674,1616],dow:[40740,41524,37315,37167,34474,36534,37590]},
-  'สุขุมวิท 77':{hour:[1630,1373,671,0,0,0,0,0,120,1752,4069,3922,3293,2675,1980,2091,2752,3387,3659,3545,3051,2801,2415,2213],dow:[51959,49106,46636,43484,43166,47320,50116]}
+  'สาทร':{hour:[1945,1470,768,0,0,0,0,0,306,1826,4495,4815,3538,2455,1850,1381,1931,2827,3968,3797,3466,2534,3054,2508],dow:[50022,53114,54620,47595,40812,46834,49543]},
+  'พญาไท':{hour:[2318,2056,885,0,0,0,0,0,800,4032,4207,4476,2822,2153,1414,1758,2182,2540,3120,3101,2748,1779,1621,1354],dow:[52070,44253,46618,42566,42112,42098,47836]},
+  'สุขุมวิท 77':{hour:[1982,1553,865,0,0,0,0,0,731,2782,5073,4668,3945,3034,2156,2278,3337,3380,3998,4710,3652,2689,2640,2259],dow:[65979,54557,54656,49525,51584,54600,59231]}
 };
 function demandOf(plan,d){ plan=plan||{}; var m=plan.cook_m||0, n=plan.cook_n||0, peak=plan.cook_mid||0;
   var dp = (d!==undefined) && plan.dayPlans && plan.dayPlans[d]!==undefined ? PLAN_BY_KEY[plan.dayPlans[d]] : null;
@@ -757,11 +758,11 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
       '<div style="width:100%;height:'+hgt+'px;border-radius:3px;background:rgba(255,255,255,'+(n?(0.35+Math.min(n,8)*0.075):0.14)+');"></div>'+
       '</div>'; }
   h+='</div>';
-  // แนวโน้มออเดอร์ (ยอดขายเฉลี่ย 13 สัปดาห์ของวันนี้ในสัปดาห์) — เทียบบรรทัดต่อบรรทัดกับแถบคนด้านบน
+  // แนวโน้มออเดอร์ (ยอดขายเฉลี่ยล่าสุดของวันนี้ในสัปดาห์) — เทียบบรรทัดต่อบรรทัดกับแถบคนด้านบน
   var tr=SALES_TREND[branch.name]||SALES_TREND[branch.short];
   if(tr){ var avgDow=tr.dow.reduce(function(t,v){return t+v;},0)/7; var f=tr.dow[sd]/avgDow;
     var mx=Math.max.apply(null,tr.hour);
-    h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:7px;"><span style="font-size:10px;font-weight:700;opacity:.75;">แนวโน้มออเดอร์'+DOWF[sd]+' (เฉลี่ย 13 สัปดาห์)</span><span class="num" style="font-size:10px;font-weight:700;opacity:.75;">~'+Math.round(tr.dow[sd]/1000)+'k บาท/วัน</span></div>';
+    h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:7px;"><span style="font-size:10px;font-weight:700;opacity:.75;">แนวโน้มออเดอร์'+DOWF[sd]+' (เฉลี่ย '+SALES_TREND_LABEL+')</span><span class="num" style="font-size:10px;font-weight:700;opacity:.75;">~'+Math.round(tr.dow[sd]/1000)+'k บาท/วัน</span></div>';
     h+='<div style="display:flex;gap:2px;margin-top:2px;align-items:flex-end;">';
     for(var h2=8;h2<=26;h2++){ var v=tr.hour[h2>=24?h2-24:h2]*f; var hg=2+(v/(mx*1.1))*24;
       h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;">'+
