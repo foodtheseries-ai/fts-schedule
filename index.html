@@ -130,7 +130,9 @@ function solveAll(state, opts){
     for(var t=0;t<8;t++){
       var st2=Object.assign({},state,{seed:(state.seed||1)+t*101});
       var r=solveAll(st2, Object.assign({},opts,{_single:true}));
-      var cost=0; Object.keys(r).forEach(function(bid){ cost += r[bid].coverShort.length*10 + r[bid].peakShort.length*3 + r[bid].unscheduled.length*30; });
+      var cost=(r._underTarget||0)*8;
+      Object.keys(r).forEach(function(bid){ if(bid.charAt(0)==='_') return;
+        cost += r[bid].coverShort.length*10 + r[bid].peakShort.length*3 + r[bid].unscheduled.length*30; });
       if(cost<bestCost){ bestCost=cost; best=r; }
       if(cost===0) break; }
     return best;
@@ -185,6 +187,11 @@ function solveAll(state, opts){
         } }); });
     } });
 
+  // ใครใช้วันหยุดไปแล้วในวันที่ล็อกไว้ (มีวันว่างในวันที่ไม่ regen) → วันจัดใหม่ต้องทำทุกวัน ห้ามได้หยุดซ้ำ
+  var mustFull={}; E.forEach(function(e){ for(var d=0;d<7;d++){ if(!regenSet[d] && !slotsOfDay(e.id,d).length){ mustFull[e.id]=1; break; } } });
+  var hasStored=false; for(var dS=0;dS<7;dS++){ if(!regenSet[dS]) hasStored=true; }
+  if(!hasStored) mustFull={};   // สัปดาห์จัดใหม่ทั้งสัปดาห์ = ยังไม่มีใครใช้วันหยุด
+  var targetOf=function(e){ return mustFull[e.id]?7:6; };
   var eligible=function(e,bid,d,slot,pos,loan){
     if(SLOTM[slot].splitOnly && !e.canSplit) return false; // พีคสั้นเฉพาะคนเบรค — คนอื่นเต็ม 10 ชม.
     if(e.positions.indexOf(pos)<0) return false;      // H5
@@ -192,6 +199,8 @@ function solveAll(state, opts){
     if(!slotAvail(e,slot)) return false;              // สะดวกกะนั้น
     if(!canAddSlot(e,d,slot)) return false;           // H1 + split
     if((slot==='morning'||slot==='mid'||slot==='lunch')&&prevNight(e.id,d)) return false; // H4: ดึกเลิกตี 3 ห้ามต่อกะสาย
+    if(slot==='night'){ var nx4=slotsOfDay(e.id,d+1);                                     // H4 มองไปข้างหน้าด้วย (พรุ่งนี้มีกะสายห้ามลงดึกวันนี้)
+      if(nx4.indexOf('morning')>=0||nx4.indexOf('mid')>=0||nx4.indexOf('lunch')>=0) return false; }
     if((gHours[e.id]||0)+SLOTM[slot].hours > (e.canOt?72:60)) return false; // เพดานชั่วโมง/สัปดาห์ (กันหนักเกิน)
     if(slotsOfDay(e.id,d).length===0){ var maxD=e.canOt?7:6; if(workDays(e.id)>=maxD) return false; } // H3 (OT ได้ 7 วัน)
     if(loan){ if(e.branchId===bid) return false; if(!e.loanOk) return false; }
@@ -334,7 +343,7 @@ function solveAll(state, opts){
   var fillTo6=function(skipPrefOff){
     [0,1,6,2,5,3,4].forEach(function(d){ if(!regenSet[d]) return;
       E.forEach(function(e){
-        if(workDays(e.id)>=6) return;
+        if(workDays(e.id)>=targetOf(e)) return;
         if(skipPrefOff && e.off.indexOf(d)>=0) return;
         if(slotsOfDay(e.id,d).length) return;
         if((gHours[e.id]||0)+10 > (e.canOt?72:60)) return;
@@ -347,6 +356,10 @@ function solveAll(state, opts){
           doAssign(e.branchId,d,slot,e,(e.positions[0]||'cook'),'home');
           break; } }); }); };
   fillTo6(true); fillTo6(false);
+  // นับคนที่ยังไม่ถึงเป้าวัน (ใช้เลือก seed ที่จัดครบกว่า)
+  var underTarget=0; E.forEach(function(e){ var free=0; for(var d=0;d<7;d++){ if(regenSet[d]&&!slotsOfDay(e.id,d).length) free++; }
+    if(mustFull[e.id]&&free>0) underTarget+=free;
+    else if(!mustFull[e.id]&&workDays(e.id)<6) underTarget+=(6-workDays(e.id)); });
 
   // ใครถูกจัดบ้าง (ข้ามสาขา) — ใช้เช็ค "จัดครบทุกคนไหม"
   var scheduled={}; branches.forEach(function(b){ for(var d=0;d<7;d++) SLOTS.forEach(function(sl){ weeks[b.id][d][sl].forEach(function(a){ scheduled[a.id]=1; }); }); });
@@ -385,6 +398,7 @@ function solveAll(state, opts){
     result[bid]={ week:week, coverShort:coverShort, peakShort:peakShort, shortDays:shortDays, noRest:noRest,
       unscheduled:unscheduled, fair:fair, loaners:loanersReal, suggestions:suggestions, offByDay:offByDay, offMoved:offMoved };
   });
+  result._underTarget=underTarget;
   return result;
 }
 
