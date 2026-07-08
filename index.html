@@ -951,6 +951,36 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
           else if(hrs-10>0.01){ var ot=Math.round((hrs-10)*10)/10; items.push(DOW[d]+' +'+ot); total+=ot; } });
         if(items.length) otLog[e.name]={items:items,total:Math.round(total*10)/10}; });
     })();
+    // ===== สมดุลกำลังคนต่อสาขา (พื้นฐานความจริง) + ตัวเตือน "ปล่อยคนออกจนตัวเองขาด" =====
+    h+='<div style="background:#fff;border:1px solid #F3EADD;border-radius:16px;padding:13px 15px;margin-top:13px;">';
+    h+='<div style="font-weight:700;font-size:13px;margin-bottom:8px;">สมดุลกำลังคนต่อสาขา</div>';
+    var drainAll=[];
+    S.branches.forEach(function(b){
+      var demand=0; for(var d=0;d<7;d++){ var dm=demandOf(b.plan,d);
+        SLOTS.forEach(function(sl){ ['cook','kasst','cash'].forEach(function(p){ demand+=(dm[sl][p]||0); }); }); }
+      var staff=S.employees.filter(function(e){return e.branchId===b.id;}).length;
+      var diff=staff*6-demand;
+      var tag = diff<0 ? '<span style="color:#C0392B;font-weight:700;">ขาด '+(-diff)+' กะ — รอพญาไทมาช่วย</span>'
+        : diff>6 ? '<span style="color:#6A4CC0;font-weight:700;">เกิน '+diff+' กะ — ส่งช่วยสาขาอื่นได้</span>'
+        : '<span style="color:#2C7A56;font-weight:700;">พอดี (+'+diff+')</span>';
+      h+='<div style="display:flex;align-items:baseline;gap:8px;font-size:11.5px;padding:4px 0;border-bottom:1px solid #F6EDE0;">'+
+        '<span style="font-weight:700;flex:0 0 88px;">'+esc(b.short||b.name)+'</span>'+
+        '<span class="num" style="color:#8A7E6E;">'+staff+' คน = '+(staff*6)+' กะ · แผนใช้ '+demand+'</span>'+
+        '<span style="flex:1;text-align:right;">'+tag+'</span></div>';
+      // drain check: สาขานี้ขาด ทั้งที่คนตัวเองไปช่วยที่อื่นวันเดียวกัน
+      var sb=allSol[b.id];
+      sb.coverShort.concat(sb.peakShort).forEach(function(c){
+        S.employees.forEach(function(e){ if(e.branchId!==b.id) return;
+          if((e.positions||[]).indexOf(c.pos)<0) return;
+          var away=null; S.branches.forEach(function(b2){ if(b2.id===b.id) return;
+            SLOTS.forEach(function(sl){ (allSol[b2.id].week[c.d][sl]||[]).forEach(function(a){ if(a.id===e.id) away=b2.short||b2.name; }); }); });
+          if(away) drainAll.push(esc(e.name)+' ไปช่วย'+esc(away)+' ทั้งที่'+esc(b.short||b.name)+'ขาด'+POSM[c.pos].label+' '+DOWF[c.d]); }); });
+    });
+    var drainU=[]; drainAll.forEach(function(x){ if(drainU.indexOf(x)<0) drainU.push(x); });
+    if(drainU.length) h+='<div style="display:flex;align-items:flex-start;gap:8px;background:#FBE6DE;border-radius:12px;padding:9px 12px;margin-top:8px;">'+svg(I_alert,14,'#C0392B',2)+'<span style="font-size:11px;color:#A2392B;font-weight:600;">ดึงคนออกจนสาขาแม่ขาด: '+drainU.join(' · ')+'</span></div>';
+    else h+='<div style="font-size:10.5px;color:#2C7A56;margin-top:7px;font-weight:600;">ไม่มีสาขาไหนถูกดึงคนจนตัวเองขาด — ยืมเฉพาะส่วนเกินจริง</div>';
+    h+='</div>';
+
     var otNames=Object.keys(otLog);
     h+='<div style="background:#fff;border:1.5px solid '+(otNames.length?'#F2C063':'#F3EADD')+';border-radius:16px;padding:13px 15px;margin-top:13px;">';
     h+='<div style="display:flex;align-items:center;gap:7px;">'+svg(I_clock,16,'#B5651D',2)+'<span style="font-size:13px;font-weight:700;color:#8A5A12;">บันทึกชั่วโมงเพิ่ม (OT) · '+weekLabel()+'</span></div>';
