@@ -87,6 +87,10 @@ function demandOf(plan,d){ plan=plan||{}; var m=plan.cook_m||0, n=plan.cook_n||0
           dinner:{cook:0,kasst:0,cash:0},
           night:{cook:1+n,kasst:1,cash:1}}; }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+// ชั่วโมงจริงของ assignment (เวลาพิเศษ a.t คิดจากเวลาจริง ข้ามเที่ยงคืนได้) — ฐานคิด OT
+function hoursOf(a){ if(a.t){ var m=String(a.t).match(/(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})/);
+    if(m){ var h=(+m[3]+(+m[4])/60)-(+m[1]+(+m[2])/60); if(h<=0) h+=24; return h; } }
+  return SLOTM[a.slot]?SLOTM[a.slot].hours:10; }
 function hashN(str){ var h=0; for(var i=0;i<str.length;i++) h=((h*31)+str.charCodeAt(i))>>>0; return h; }
 function weekDates(){ var t=new Date(); var wd=(t.getDay()+6)%7; var mon=new Date(t); mon.setHours(0,0,0,0); mon.setDate(t.getDate()-wd+((window.S&&S.weekOffset||0)*7));
   var arr=[]; for(var d=0;d<7;d++){ var x=new Date(mon); x.setDate(mon.getDate()+d); arr.push(x); } return arr; }
@@ -391,14 +395,18 @@ function solveAll(state, opts){
         if(skipPrefOff && e.off.indexOf(d)>=0) return;
         if(slotsOfDay(e.id,d).length) return;
         if((gHours[e.id]||0)+10 > (e.canOt?72:60)) return;
-        var tryOrder = e.home==='night' ? ['night','morning','mid'] : e.home==='mid' ? ['mid','morning','night'] : ['morning','mid','night'];
-        for(var i=0;i<tryOrder.length;i++){ var slot=tryOrder[i];
-          if(!slotAvail(e,slot)) continue;
-          if((slot==='morning'||slot==='mid')&&prevNight(e.id,d)) continue;
+        // เลือกกะที่ "คนบางสุด" ก่อน (เกลี่ยกำลังตามช่วงเวลา ไม่กองรวมกะเดียว) — เสมอกันค่อยตามที่ถนัด
+        var prefOrder = e.home==='night' ? ['night','morning','mid'] : e.home==='mid' ? ['mid','morning','night'] : ['morning','mid','night'];
+        var ok=prefOrder.filter(function(slot){
+          if(!slotAvail(e,slot)) return false;
+          if((slot==='morning'||slot==='mid')&&prevNight(e.id,d)) return false;
           if(slot==='night'){ var nx=slotsOfDay(e.id,d+1);
-            if(nx.indexOf('morning')>=0||nx.indexOf('mid')>=0||nx.indexOf('lunch')>=0) continue; }
-          doAssign(e.branchId,d,slot,e,(e.positions[0]||'cook'),'home');
-          break; } }); }); };
+            if(nx.indexOf('morning')>=0||nx.indexOf('mid')>=0||nx.indexOf('lunch')>=0) return false; }
+          return true; });
+        if(!ok.length) return;
+        ok.sort(function(a2,b2){ var ca=weeks[e.branchId][d][a2].length, cb=weeks[e.branchId][d][b2].length;
+          return ca-cb || prefOrder.indexOf(a2)-prefOrder.indexOf(b2); });
+        doAssign(e.branchId,d,ok[0],e,(e.positions[0]||'cook'),'home'); }); }); };
   fillTo6(true); fillTo6(false);
   // นับคนที่ยังไม่ถึงเป้าวัน (ใช้เลือก seed ที่จัดครบกว่า)
   var underTarget=0; E.forEach(function(e){ var free=0; for(var d=0;d<7;d++){ if(regenSet[d]&&!slotsOfDay(e.id,d).length) free++; }
@@ -659,8 +667,9 @@ function personCard(a,bid,d){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:
   if(loan){ var from=(S.branches.find(function(b){return b.id===a.homeBranch;})||{}).short||'';
     badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#C4571E;background:#FFE9D6;padding:2px 7px;border-radius:6px;margin-top:4px;margin-right:4px;">'+svg(I_arrow,10,'#C4571E',2)+'ช่วยจาก '+esc(from)+'</span>'; }
   if(cg){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#6A4CC0;background:#EDE8FB;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_car,10,'#6A4CC0',1.8)+'คู่รถ</span>'; }
-  if((window._splitToday||{})[a.id]>1){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_clock,10,'#B5651D',2)+'คุม 2 พีค</span>'; }
-  if(a.ext){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_clock,10,'#B5651D',2)+'กะยาว 12 ชม. (OT)</span>'; }
+  if((window._splitToday||{})[a.id]>1){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 7px;border-radius:6px;margin-top:4px;margin-right:4px;">'+svg(I_clock,10,'#B5651D',2)+'คุม 2 พีค</span>'; }
+  var otN=(window._otToday||{})[a.id];
+  if(otN){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:800;color:#fff;background:#B5651D;padding:2px 7px;border-radius:6px;margin-top:4px;">OT +'+otN+' ชม. (คิดเงินเพิ่ม)</span>'; }
   if(badges) h+='<div>'+badges+'</div>';
   h+='</div>';
   h+='<span class="num" style="font-weight:700;font-size:12.5px;color:'+(a.t?'#B5651D':'#3A4A55')+';background:'+(a.t?'#FFF1D6':'#F1F5F8')+';padding:5px 10px;border-radius:9px;white-space:nowrap;flex:0 0 auto;">'+esc(a.t||SLOTM[a.slot].time)+'</span>';
@@ -692,7 +701,10 @@ function renderView(bid,branch,branchEmps,branchEmpty,dates,todayIdx,sd,sol){
 
 function renderDay(bid,branch,dates,todayIdx,sd,sol){
   var daySol=sol.week[sd]||{}; SLOTS.forEach(function(s){ if(!daySol[s]) daySol[s]=[]; });
-  var cnt={}; SLOTS.forEach(function(sl){ (daySol[sl]||[]).forEach(function(a){ cnt[a.id]=(cnt[a.id]||0)+1; }); }); window._splitToday=cnt;
+  var cnt={}, otH={}; SLOTS.forEach(function(sl){ (daySol[sl]||[]).forEach(function(a){ cnt[a.id]=(cnt[a.id]||0)+1;
+    a.slot=sl; otH[a.id]=(otH[a.id]||0)+hoursOf(a); }); });
+  window._splitToday=cnt; window._otToday={};
+  Object.keys(otH).forEach(function(id){ if(otH[id]-10>0.01) window._otToday[id]=Math.round((otH[id]-10)*10)/10; });
   var dayCount=SLOTS.reduce(function(t,s){ return t+daySol[s].length; },0);
   var editable=isGenerated(sd)&&!!getPin();   // ล็อก: คนทั่วไปดูอย่างเดียว
   var h='';
@@ -761,28 +773,27 @@ function renderWeek(bid,branch,dates,todayIdx,sol){
     h+='<span style="font-weight:700;font-size:13px;">'+DOWF[d]+' '+dates[d].getDate()+(isToday?' <span style="font-size:9.5px;color:#C77A1B;background:#FFF1D6;padding:1px 6px;border-radius:6px;">วันนี้</span>':'')+'</span>';
     h+='<span style="font-size:10.5px;font-weight:700;color:'+(gen?'#2C7A56':'#9A8C7C')+';">'+(gen?'จัดแล้ว':'พรีวิว')+(dShort.length?(' · <span style="color:#C0392B;">ขาด '+dShort.length+'</span>'):'')+'</span>';
     h+='</div>';
-    // แถวกะ: เช้า/ดึก โชว์เสมอ · กะกลาง+คู่เบรคโชว์เมื่อมีคน · มีเวลากำกับทุกแถว · คนเวลาพิเศษแยกแถวต่างหาก
-    var wSpec=[];
-    SLOTS.forEach(function(slot){ var full=dd[slot]||[]; var m=SLOTM[slot];
-      var list=full.filter(function(a){ return !a.t; });
-      full.forEach(function(a){ if(a.t){ a.slot=slot; wSpec.push(a); } });
-      if(!list.length && slot!=='morning' && slot!=='night') return;
+    // แถวตามช่วงเวลาจริง เรียงตามเวลาเข้า (ซันขอ: รู้ว่าใครเข้าเวลาไหนพอ) · คน OT เกิน 10 ชม./วัน ติดป้าย +ชม.
+    var groups={}, dayHrs={};
+    SLOTS.forEach(function(slot){ (dd[slot]||[]).forEach(function(a){ a.slot=slot;
+      var t=(a.t||SLOTM[slot].time).replace('–','-');
+      (groups[t]=groups[t]||[]).push(a);
+      dayHrs[a.id]=(dayHrs[a.id]||0)+hoursOf(a); }); });
+    var tKeys=Object.keys(groups).sort(function(x,y){
+      function st(s){ var m=s.match(/^(\d{1,2}):(\d{2})/); return m?(+m[1]*60+ +m[2]):0; }
+      return st(x)-st(y)||x.localeCompare(y); });
+    if(!tKeys.length) h+='<div style="font-size:10.5px;color:#C0B4A2;padding:3px 0;">—</div>';
+    tKeys.forEach(function(t){ var list=groups[t]; var m=SLOTM[list[0].slot]||{};
+      var seenOt={};
       h+='<div style="display:flex;align-items:flex-start;gap:7px;padding:3px 0;">'+
-        '<span style="display:flex;align-items:center;gap:4px;flex:0 0 74px;margin-top:2px;">'+
-          '<span style="width:7px;height:7px;border-radius:50%;background:'+m.dot+';flex:0 0 auto;"></span>'+
-          '<span class="num" style="font-size:9.5px;font-weight:700;color:'+(m.peak?'#B5651D':'#7A6A57')+';white-space:nowrap;">'+m.time.replace('–','-')+'</span></span>'+
-        '<div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;">'+(list.length?list.map(function(a){ a.slot=slot; return nameChipMini(a,bid,d,slot,false); }).join(''):'<span style="font-size:10.5px;color:#C0B4A2;padding-top:2px;">—</span>')+'</div></div>';
+        '<span style="display:flex;align-items:center;gap:4px;flex:0 0 82px;margin-top:2px;">'+
+          '<span style="width:7px;height:7px;border-radius:50%;background:'+(m.dot||'#B5651D')+';flex:0 0 auto;"></span>'+
+          '<span class="num" style="font-size:9.5px;font-weight:700;color:#7A6A57;white-space:nowrap;">'+esc(t)+'</span></span>'+
+        '<div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;">'+list.map(function(a){
+          var ot=(dayHrs[a.id]||0)-10; var tag='';
+          if(ot>0.01&&!seenOt[a.id]){ seenOt[a.id]=1; tag='<span class="num" style="font-size:9px;font-weight:800;color:#B5651D;">+'+(Math.round(ot*10)/10)+'ชม.</span>'; }
+          return '<span style="display:inline-flex;align-items:center;gap:3px;">'+nameChipMini(a,bid,d,a.slot,false)+tag+'</span>'; }).join('')+'</div></div>';
     });
-    if(wSpec.length){
-      wSpec.sort(function(a,b){ return String(a.t).localeCompare(String(b.t)); });
-      h+='<div style="display:flex;align-items:flex-start;gap:7px;padding:3px 0;">'+
-        '<span style="display:flex;align-items:center;gap:4px;flex:0 0 74px;margin-top:2px;">'+
-          '<span style="width:7px;height:7px;border-radius:50%;background:#B5651D;flex:0 0 auto;"></span>'+
-          '<span style="font-size:9.5px;font-weight:700;color:#B5651D;white-space:nowrap;">เวลาพิเศษ</span></span>'+
-        '<div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;">'+wSpec.map(function(a){
-          return '<span style="display:inline-flex;align-items:center;gap:4px;">'+nameChipMini(a,bid,d,a.slot,false)+
-            '<span class="num" style="font-size:9px;font-weight:700;color:#B5651D;">'+esc(a.t)+'</span></span>'; }).join('')+'</div></div>';
-    }
     h+='</div>';
   })(d); }
   h+='</div><div style="height:8px;"></div>';
@@ -869,6 +880,37 @@ function renderSetup(bid,branch,branchEmps,branchEmpty,sol){
     if(otKeys.length) h+='<div style="margin-top:8px;font-size:11px;color:#8A5A12;">OT 7 วัน: '+otKeys.map(esc).join(' · ')+'</div>';
     if(lowHours.length) h+='<div style="display:flex;align-items:center;gap:8px;background:#FBE6DE;border-radius:12px;padding:9px 12px;margin-top:6px;">'+svg(I_alert,14,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">ยังไม่ครบ 6 วัน: '+lowHours.join(' · ')+'</span></div>';
     if(offMovedAll.length) h+='<div style="display:flex;align-items:flex-start;gap:8px;background:#FFF1D6;border-radius:12px;padding:9px 12px;margin-top:6px;">'+svg(I_cal2,14,'#B5651D',2)+'<span style="font-size:11.5px;color:#8A5A12;font-weight:600;">ย้ายวันหยุดตามหน้างาน: '+offMovedAll.join(' · ')+' — แจ้งพนักงานด้วย</span></div>';
+    h+='</div>';
+
+    // ===== บันทึกชั่วโมงเพิ่ม (OT) สัปดาห์นี้ — ใช้คิดเงินเดือนเพิ่ม =====
+    // กติกา: เกิน 10 ชม./วัน = OT ส่วนเกิน · วันทำงานเกิน 6 วัน/สัปดาห์ = วันเสริม (นับชั่วโมงทั้งวัน)
+    var otLog={}; // name -> {items:[], total}
+    (function(){
+      var perDay={}; // id -> {d: hours}
+      S.branches.forEach(function(b){ var sb=allSol[b.id]; for(var d=0;d<7;d++){
+        SLOTS.forEach(function(sl){ (sb.week[d][sl]||[]).forEach(function(a){ a.slot=sl;
+          perDay[a.id]=perDay[a.id]||{}; perDay[a.id][d]=(perDay[a.id][d]||0)+hoursOf(a); }); }); } });
+      Object.keys(perDay).forEach(function(id){ var e=empById(id); if(!e) return;
+        var days=Object.keys(perDay[id]).map(Number);
+        var extraDays=[];
+        if(days.length>6){ var sorted=days.slice().sort(function(a,b){return perDay[id][a]-perDay[id][b];});
+          extraDays=sorted.slice(0,days.length-6); }
+        var items=[],total=0;
+        days.sort(function(a,b){return a-b;}).forEach(function(d){ var hrs=perDay[id][d];
+          if(extraDays.indexOf(d)>=0){ items.push(DOW[d]+' วันเสริม +'+(Math.round(hrs*10)/10)); total+=hrs; }
+          else if(hrs-10>0.01){ var ot=Math.round((hrs-10)*10)/10; items.push(DOW[d]+' +'+ot); total+=ot; } });
+        if(items.length) otLog[e.name]={items:items,total:Math.round(total*10)/10}; });
+    })();
+    var otNames=Object.keys(otLog);
+    h+='<div style="background:#fff;border:1.5px solid '+(otNames.length?'#F2C063':'#F3EADD')+';border-radius:16px;padding:13px 15px;margin-top:13px;">';
+    h+='<div style="display:flex;align-items:center;gap:7px;">'+svg(I_clock,16,'#B5651D',2)+'<span style="font-size:13px;font-weight:700;color:#8A5A12;">บันทึกชั่วโมงเพิ่ม (OT) · '+weekLabel()+'</span></div>';
+    if(!otNames.length) h+='<div style="font-size:11.5px;color:#9A8C7C;margin-top:7px;">สัปดาห์นี้ไม่มีใครทำเกินเวลา</div>';
+    else{ h+='<div style="font-size:10.5px;color:#9A8C7C;margin-top:4px;">เกิน 10 ชม./วัน = OT · เกิน 6 วัน/สัปดาห์ = วันเสริมนับทั้งวัน — ใช้คิดเงินเดือนเพิ่ม</div>';
+      otNames.sort(function(a,b){return otLog[b].total-otLog[a].total;}).forEach(function(n){ var o=otLog[n];
+        h+='<div style="display:flex;align-items:baseline;gap:8px;margin-top:8px;border-bottom:1px solid #F6EDE0;padding-bottom:7px;">'+
+          '<span style="font-weight:700;font-size:12.5px;flex:0 0 auto;">'+esc(n)+'</span>'+
+          '<span style="flex:1;font-size:10.5px;color:#8A7E6E;">'+o.items.map(esc).join(' · ')+'</span>'+
+          '<span class="num" style="font-weight:800;font-size:13px;color:#B5651D;flex:0 0 auto;">'+o.total+' ชม.</span></div>'; }); }
     h+='</div>';
   }
   // learnings สรุป
