@@ -543,6 +543,11 @@ function renderView(bid,branch,branchEmps,branchEmpty,dates,todayIdx,sd,sol){
   h+='<button onclick="setViewMode(\'day\')" style="flex:1;border:none;border-radius:9px;padding:7px;cursor:pointer;font-weight:700;font-size:12px;background:'+(S.viewMode==='day'?'#fff':'transparent')+';color:'+(S.viewMode==='day'?'#1A1A2E':'#8A7E6E')+';display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_cal,14,'currentColor')+'วันเดียว</button>';
   h+='<button onclick="setViewMode(\'week\')" style="flex:1;border:none;border-radius:9px;padding:7px;cursor:pointer;font-weight:700;font-size:12px;background:'+(S.viewMode==='week'?'#fff':'transparent')+';color:'+(S.viewMode==='week'?'#1A1A2E':'#8A7E6E')+';display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_grid,14,'currentColor')+'ทั้งสัปดาห์</button>';
   h+='</div>';
+  // คำอธิบายสี = ตำแหน่ง — พนักงานดูปุ๊บรู้ว่าวันนั้นตัวเองเข้าตำแหน่งไหน
+  h+='<div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:9px;">';
+  ['cook','kasst','cash'].forEach(function(k){ var m=POSM[k];
+    h+='<span style="display:inline-flex;align-items:center;gap:5px;background:'+m.bg+';color:'+m.color+';font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:8px;"><span style="width:7px;height:7px;border-radius:50%;background:'+m.color+';"></span>'+m.label+'</span>'; });
+  h+='</div>';
   return h + (S.viewMode==='week' ? renderWeek(bid,branch,dates,todayIdx,sol) : renderDay(bid,branch,dates,todayIdx,sd,sol));
 }
 
