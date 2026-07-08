@@ -77,6 +77,13 @@ var PLAN_BY_KEY={}; PLANS.forEach(function(p){ PLAN_BY_KEY[p.key]=p; });
 // → จ แรงสุดทุกสาขา · พฤ+ศ เบาสุด (13 สัปดาห์ยืนยัน — ต่างจากหน้าต่าง 30 วันที่หลอกว่า พ เบา)
 // พีคชั่วโมง: 10-12 หลัก + 17-20 รอง เหมือนกันทุกวัน → กะกลาง 10-20 ครอบพอดี
 var PEAK_DAYS={0:1,1:1,2:1,5:1,6:1};
+// ยอดขายเฉลี่ยจริง 13 สัปดาห์ (7 เม.ย.–7 ก.ค. 2026 จาก FoodStory): hour=บาท/ชม./วัน · dow=บาท/วัน (จ..อา)
+// ใช้โชว์แนวโน้มออเดอร์เทียบกับตารางคน — ควรอัปเดตทุก 1-2 เดือน
+var SALES_TREND={
+  'สาทร':{hour:[1590,1277,661,0,0,0,0,0,49,1232,2985,3262,2379,1800,1498,1441,1731,2528,3084,3183,2648,2351,2342,2184],dow:[40970,42210,39192,37319,33548,35292,39034]},
+  'พญาไท':{hour:[1662,1512,640,0,0,0,0,0,125,1836,3127,3844,2956,2143,1591,1436,1891,2359,2709,2508,2246,2032,1674,1616],dow:[40740,41524,37315,37167,34474,36534,37590]},
+  'สุขุมวิท 77':{hour:[1630,1373,671,0,0,0,0,0,120,1752,4069,3922,3293,2675,1980,2091,2752,3387,3659,3545,3051,2801,2415,2213],dow:[51959,49106,46636,43484,43166,47320,50116]}
+};
 function demandOf(plan,d){ plan=plan||{}; var m=plan.cook_m||0, n=plan.cook_n||0, peak=plan.cook_mid||0;
   var dp = (d!==undefined) && plan.dayPlans && plan.dayPlans[d]!==undefined ? PLAN_BY_KEY[plan.dayPlans[d]] : null;
   if(dp){ m=dp.m; peak=dp.mid; n=dp.n; }                 // แผนรายวัน (เลือกเอง/จากยอดขาย) ชนะแผนหลัก
@@ -214,6 +221,13 @@ function solveAll(state, opts){
   var hasStored=false; for(var dS=0;dS<7;dS++){ if(!regenSet[dS]) hasStored=true; }
   if(!hasStored) mustFull={};   // สัปดาห์จัดใหม่ทั้งสัปดาห์ = ยังไม่มีใครใช้วันหยุด
   var targetOf=function(e){ return mustFull[e.id]?7:6; };
+  // กฎทิศทางยืม (ซัน 8 ก.ค.): พญาไทคนเยอะ = ส่งออกอย่างเดียว ห้ามรับเข้า · สาทร/สข77 ห้ามส่งคนออก
+  // ยกเว้นคู่รถบาส+จ๋า (พักสาทร ทำงานสข77) สลับ สาทร↔สข77 ได้ตามเหมาะสม
+  var canLoanTo=function(e,bid){
+    if(brName[bid]==='พญาไท') return false;
+    if(brName[e.branchId]==='พญาไท') return true;
+    if(e.cg && (brName[bid]==='สาทร'||brName[bid]==='สุขุมวิท 77')) return true;
+    return false; };
   var eligible=function(e,bid,d,slot,pos,loan){
     if(SLOTM[slot].splitOnly && !e.canSplit) return false; // พีคสั้นเฉพาะคนเบรค — คนอื่นเต็ม 10 ชม.
     if(e.positions.indexOf(pos)<0) return false;      // H5
@@ -225,7 +239,7 @@ function solveAll(state, opts){
       if(nx4.indexOf('morning')>=0||nx4.indexOf('mid')>=0||nx4.indexOf('lunch')>=0) return false; }
     if((gHours[e.id]||0)+SLOTM[slot].hours > (e.canOt?72:60)) return false; // เพดานชั่วโมง/สัปดาห์ (กันหนักเกิน)
     if(slotsOfDay(e.id,d).length===0){ var maxD=e.canOt?7:6; if(workDays(e.id)>=maxD) return false; } // H3 (OT ได้ 7 วัน)
-    if(loan){ if(e.branchId===bid) return false; if(!e.loanOk) return false; }
+    if(loan){ if(e.branchId===bid) return false; if(!e.loanOk) return false; if(!canLoanTo(e,bid)) return false; }
     else { if(e.branchId!==bid) return false; }
     return true; };
   var score=function(e,bid,d,slot,pos,loan){
@@ -263,7 +277,7 @@ function solveAll(state, opts){
   // ลำดับช่อง: ดึก (คนเข้าได้น้อยสุด) → เช้า → พีค · augment ของพีคจะ reroute สมอได้แต่ไม่ทำให้สมอหลุด
   var canServe=function(e,s,d){
     if(slotsOfDay(e.id,d).length) return false;          // มีกะแล้ว (pre-place/ล็อก)
-    var loan=e.branchId!==s.bid; if(loan&&!e.loanOk) return false;
+    var loan=e.branchId!==s.bid; if(loan&&(!e.loanOk||!canLoanTo(e,s.bid))) return false;
     if(s.slot==='night'){ var nx=slotsOfDay(e.id,d+1);   // H4 มองไปข้างหน้า: พรุ่งนี้มีกะสาย (วันล็อก/เก็บไว้) ห้ามลงดึกวันนี้
       if(nx.indexOf('morning')>=0||nx.indexOf('mid')>=0||nx.indexOf('lunch')>=0) return false; }
     if(s.slot==='mid'){
@@ -313,7 +327,7 @@ function solveAll(state, opts){
             var best=null,bs=-1e9,bestLoc=null,bestR=null;
             E.forEach(function(P){
               if(slotsOfDay(P.id,d).length) return;
-              var loan=P.branchId!==bid; if(loan&&!P.loanOk) return;
+              var loan=P.branchId!==bid; if(loan&&(!P.loanOk||!canLoanTo(P,bid))) return;
               if(P.positions.indexOf(pos)<0) return; if(!slotAvail(P,slot)) return;
               if((slot==='morning'||slot==='mid')&&prevNight(P.id,d)) return;
               if(slot==='night'){ var nx=slotsOfDay(P.id,d+1);
@@ -363,7 +377,7 @@ function solveAll(state, opts){
   // ขัดเกลา: สลับคู่คนในวันเดียวกันถ้าคะแนนรวมดีขึ้น (คู่รถ · รถรอบเดียว · กะถนัด) — ครบเท่าเดิม ชั่วโมงเท่าเดิม
   var swapServe=function(e,cell,d){
     if(e.positions.indexOf(cell.a.pos)<0) return false;
-    var loan=e.branchId!==cell.bid; if(loan&&!e.loanOk) return false;
+    var loan=e.branchId!==cell.bid; if(loan&&(!e.loanOk||!canLoanTo(e,cell.bid))) return false;
     if(!slotAvail(e,cell.slot)) return false;
     if((cell.slot==='morning'||cell.slot==='mid')&&prevNight(e.id,d)) return false;
     if(cell.slot==='night'){ var nx=slotsOfDay(e.id,d+1);
@@ -434,6 +448,7 @@ function solveAll(state, opts){
     var seen={}; var suggestions=[];
     coverShort.forEach(function(c){ E.forEach(function(e){
       if(e.branchId===bid) return; if(e.loanOk) return;
+      if(brName[bid]==='พญาไท') return; if(brName[e.branchId]!=='พญาไท' && !e.cg) return;   // แนะนำเฉพาะทิศทางที่กฎอนุญาต
       if(e.positions.indexOf(c.pos)<0) return; if(e.off.indexOf(c.d)>=0) return; if(slotsOfDay(e.id,c.d).length) return;
       var key=e.id+'|'+c.d; if(seen[key]) return; seen[key]=1;
       suggestions.push({empId:e.id,name:e.name,from:brName[e.branchId],d:c.d,slot:c.slot,pos:c.pos}); }); });
@@ -733,14 +748,29 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
   h+='<div style="display:flex;align-items:baseline;gap:8px;margin-top:8px;"><span class="num" style="font-weight:800;font-size:26px;line-height:1;">'+dayCount+'</span><span style="font-size:14px;font-weight:600;">คนเข้างานวันนี้</span></div>';
   h+='<div style="font-size:12.5px;opacity:.85;margin-top:3px;">ช่วงเช้า (09:00) '+atHour(9)+' คน · พีคเที่ยง (11:00) '+atHour(11)+' คน · พีคเย็น (19:00) '+atHour(19)+' คน · ดึก (23:00) '+atHour(23)+' คน</div>';
   // แถบคนต่อชั่วโมง 08:00→03:00 — เห็นทันทีว่าช่วงไหนกี่คน
-  h+='<div style="display:flex;gap:2px;margin-top:10px;align-items:flex-end;">';
+  h+='<div style="font-size:10px;font-weight:700;opacity:.75;margin-top:10px;">พนักงานต่อชั่วโมง</div>';
+  h+='<div style="display:flex;gap:2px;margin-top:2px;align-items:flex-end;">';
   for(var hh=8;hh<=26;hh++){ var n=atHour(hh===24?0:(hh>24?hh-24:hh));
     var hgt=6+Math.min(n,8)*3.4;
     h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;">'+
       '<span class="num" style="font-size:8.5px;font-weight:700;opacity:.85;">'+(n||'')+'</span>'+
       '<div style="width:100%;height:'+hgt+'px;border-radius:3px;background:rgba(255,255,255,'+(n?(0.35+Math.min(n,8)*0.075):0.14)+');"></div>'+
-      ((hh%3===2)?'<span class="num" style="font-size:8px;opacity:.7;">'+((hh>=24?hh-24:hh))+'</span>':'<span style="font-size:8px;">&nbsp;</span>')+'</div>'; }
-  h+='</div></div>';
+      '</div>'; }
+  h+='</div>';
+  // แนวโน้มออเดอร์ (ยอดขายเฉลี่ย 13 สัปดาห์ของวันนี้ในสัปดาห์) — เทียบบรรทัดต่อบรรทัดกับแถบคนด้านบน
+  var tr=SALES_TREND[branch.name]||SALES_TREND[branch.short];
+  if(tr){ var avgDow=tr.dow.reduce(function(t,v){return t+v;},0)/7; var f=tr.dow[sd]/avgDow;
+    var mx=Math.max.apply(null,tr.hour);
+    h+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:7px;"><span style="font-size:10px;font-weight:700;opacity:.75;">แนวโน้มออเดอร์'+DOWF[sd]+' (เฉลี่ย 13 สัปดาห์)</span><span class="num" style="font-size:10px;font-weight:700;opacity:.75;">~'+Math.round(tr.dow[sd]/1000)+'k บาท/วัน</span></div>';
+    h+='<div style="display:flex;gap:2px;margin-top:2px;align-items:flex-end;">';
+    for(var h2=8;h2<=26;h2++){ var v=tr.hour[h2>=24?h2-24:h2]*f; var hg=2+(v/(mx*1.1))*24;
+      h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:1px;">'+
+        '<div style="width:100%;height:'+hg+'px;border-radius:3px 3px 1px 1px;background:rgba(26,26,46,'+(v>10?(0.28+(v/(mx*1.1))*0.5):0.08)+');"></div>'+
+        ((h2%3===2)?'<span class="num" style="font-size:8px;opacity:.7;">'+((h2>=24?h2-24:h2))+'</span>':'<span style="font-size:8px;">&nbsp;</span>')+'</div>'; }
+    h+='</div>';
+    h+='<div style="font-size:9.5px;opacity:.65;margin-top:3px;">แท่งขาว = คน · แท่งเข้ม = ยอดขาย — สองแถวควรขึ้นลงไปทางเดียวกัน</div>';
+  }
+  h+='</div>';
   var dShort=S.editMode?sol.coverShort.concat(sol.peakShort).filter(function(c){return c.d===sd;}):[];
   if(dShort.length){ var txt='วันนี้ขาด '+dShort.map(function(c){return POSM[c.pos].label+' '+SLOTM[c.slot].label;}).join(' · ');
     h+='<div style="display:flex;align-items:center;gap:8px;background:#FBE6DE;border-radius:13px;padding:10px 13px;margin-top:12px;">'+svg(I_alert,15,'#C0392B',2)+'<span style="font-size:11.5px;color:#A2392B;font-weight:600;">'+esc(txt)+'</span></div>'; }
@@ -1063,6 +1093,27 @@ function renderSheet(){
 }
 
 load();
+
+// ===== อัปเดตอัตโนมัติ — ตารางเปลี่ยนที่ไหน ทุกเครื่องเห็นเองใน ~45 วิ (หรือทันทีที่เปิดแอปกลับมา) =====
+var _syncKey=null, _lastSync=0, _syncWeek=null;
+function syncCheck(force){ var now=Date.now();
+  if(!force && now-_lastSync<40000) return;
+  if(S.loading) return; _lastSync=now;
+  Promise.all([api('sched_all'), api('sched_grid_get',{p_week:weekStartIso()})]).then(function(res){
+    var key=JSON.stringify([res[0].seed, res[0].branches, res[0].employees, res[1]]);
+    if(_syncKey===null || _syncWeek!==S.weekOffset){ _syncKey=key; _syncWeek=S.weekOffset; return; }  // เปลี่ยนสัปดาห์ = ตั้งฐานใหม่ ไม่ใช่อัปเดต
+    if(key===_syncKey) return;
+    _syncKey=key;
+    if(S.editEmp||S.editCell||S.pinAsk||S.genOpen) return;   // กำลังแก้อยู่ อย่าทับ
+    S.branches=res[0].branches; S.employees=res[0].employees; S.seed=res[0].seed; S.learnings=res[0].learnings||[];
+    if(!S.activeBranch||!S.branches.some(function(b){return b.id===S.activeBranch;})) S.activeBranch=(S.branches[0]||{}).id;
+    S.grid=res[1]||{};
+    render(); toast('ตารางอัปเดตแล้ว');
+  }).catch(function(){});
+}
+setInterval(function(){ syncCheck(false); }, 45000);
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) syncCheck(true); });
+setTimeout(function(){ syncCheck(true); }, 4000);   // ตั้ง baseline หลังโหลดครั้งแรก
 </script>
 </body>
 </html>
