@@ -121,6 +121,7 @@ function cloneDay(dd){ dd=dd||{};
   var o={}; SLOTS.forEach(function(s){ o[s]=[]; });
   SLOTS.forEach(function(s){ (dd[s]||[]).forEach(function(a){ var c={id:a.id,pos:a.pos,via:a.via,homeBranch:a.homeBranch,locked:!!a.locked};
     if(a.t) c.t=a.t;   // เวลาจริงที่หน้างานกำหนด (ต่างจากกะมาตรฐาน) — ต้องไม่หายตอน clone/save
+    if(a.ext) c.ext=true;   // กะยาว OT (บรีสโมเดล)
     o[s].push(c); }); });
   return o; }
 
@@ -171,11 +172,13 @@ function solveAll(state, opts){
     if(slot==='mid') return e.aM||e.aMid;
     if(slot==='lunch'||slot==='dinner') return true;  // เฉพาะคน split (กรอง splitOnly ใน eligible) — รับตารางเบรคเอง
     return true; };
-  // H1 v6: ทุกคนเต็ม 10 ชม. กะเดียว/วัน — ยกเว้นคน split ทำคู่เบรค เที่ยง+เย็น (วันเดียวกัน)
+  // H1 v9: ทุกคนเต็ม 10 ชม. กะเดียว/วัน — ยกเว้น split ทำคู่เบรค (เที่ยง+เย็น) · อ๊อดโมเดล split+OT ทำเที่ยง+ดึกวันเดียว (คุม 2 พีค)
   var canAddSlot=function(e,d,slot){ var cur=slotsOfDay(e.id,d);
     if(cur.indexOf(slot)>=0) return false; if(cur.length===0) return true; if(cur.length>=2) return false;
     var set={}; set[cur[0]]=1; set[slot]=1;
-    return !!(e.canSplit && set.lunch && set.dinner); };
+    if(e.canSplit && set.lunch && set.dinner) return true;
+    if(e.canSplit && e.canOt && set.lunch && set.night) return true;
+    return false; };
 
   // 0) pre-place: วันไม่ regen = คงทั้งวัน · วัน regen = เฉพาะที่ล็อกมือ
   branches.forEach(function(b){ var sb=storedGrid[b.id]; if(!sb) return;
@@ -184,9 +187,10 @@ function solveAll(state, opts){
         if(!regenSet[d] || a.locked){ var e=Emap[a.id]; if(!e) return; if(slotsOfDay(a.id,d).indexOf(slot)>=0) return;
           var pp={id:a.id,pos:a.pos,via:a.via||'home',homeBranch:a.homeBranch||e.branchId,locked:!!a.locked};
           if(a.t) pp.t=a.t;   // เวลาจริงหน้างาน — พกไปถึงหน้าจอ
+          if(a.ext) pp.ext=true;
           weeks[b.id][d][slot].push(pp);
           var k=a.id+'|'+d; (gSlots[k]=gSlots[k]||[]).push(slot);
-          gDays[a.id]=gDays[a.id]||{}; gDays[a.id][d]=1; gHours[a.id]=(gHours[a.id]||0)+SLOTM[slot].hours;
+          gDays[a.id]=gDays[a.id]||{}; gDays[a.id][d]=1; gHours[a.id]=(gHours[a.id]||0)+SLOTM[slot].hours+(a.ext?2:0);
           if(a.via==='loan') gLoan[a.id]=(gLoan[a.id]||0)+1;
         } }); });
     } });
@@ -232,11 +236,13 @@ function solveAll(state, opts){
     s += (hashN(e.id+'|'+bid+'|'+d+'|'+slot+'|'+seed)%100)*0.05;
     return s; };
 
-  // นับพีคที่คุมแล้ว = คนกะกลาง + คู่เบรคครบ 2 พีค (คนเดียวกันทั้งเที่ยง+เย็น)
+  // นับพีคที่คุมแล้ว = กะกลาง + คู่เบรค (เที่ยง+เย็น) + อ๊อดโมเดล (เที่ยง+ดึกคนเดียวกัน) + บรีสโมเดล (เช้ายาว 08-20 คุมพีคเย็นด้วย)
   var midCovered=function(bid,d){ var seen={}; var pairs=0;
     weeks[bid][d].lunch.forEach(function(a){ seen[a.id]=1; });
     weeks[bid][d].dinner.forEach(function(a){ if(seen[a.id]) pairs++; });
-    return cellPos(bid,d,'mid','cook')+pairs; };
+    weeks[bid][d].night.forEach(function(a){ if(seen[a.id]) pairs++; });
+    var ext=weeks[bid][d].morning.filter(function(a){ return a.ext; }).length;   // บรีสโมเดลใช้ได้ทุกตำแหน่ง (ตามหน้างานจริง)
+    return cellPos(bid,d,'mid','cook')+pairs+ext; };
 
   // ===== จัดรายวันแบบ bipartite matching (Kuhn's augmenting path) =====
   // กำลังคนตึงมาก (คนว่าง/วัน ≈ ที่ต้องใช้/วัน) — greedy พลาดง่าย matching การันตีเติมได้มากสุด
@@ -314,6 +320,32 @@ function solveAll(state, opts){
             doAssign(bid,d,slot,best,pos,best.branchId!==bid?'loan':'home');
           } }); }); })(d); } }); };
   repairCross();
+  // ===== กะยืดหยุ่น (ถอดจากท่าจริงหน้างาน) — ใช้เฉพาะเมื่อพีคยังขาด (OT = จ่ายเพิ่ม ไม่หว่านทิ้ง) =====
+  // บรีสโมเดล: ยืดคน OT กะเช้าเป็น 08-20 (+2 ชม.) คนเดียวคุมเช้า+พีคเย็น · อ๊อดโมเดล: คนดึก split+OT เสริมพีคเที่ยง 10-14 (+4 ชม.)
+  var flexPeaks=function(){
+    for(var d=0;d<7;d++){ if(!regenSet[d]) continue; (function(d){
+      branches.forEach(function(b){ var bid=b.id;
+        var need=(demandOf(brPlan[bid],d).mid.cook||0)-midCovered(bid,d);
+        var g=0;
+        while(need>0&&g<4){ g++;
+          // (a) ยืดกะเช้า OT → 08-20 (ถูกสุด +2 ชม.)
+          var cand=null,bs=-1e9;
+          weeks[bid][d].morning.forEach(function(a){ if(a.locked||a.ext) return;
+            var e=Emap[a.id]; if(!e||!e.canOt) return;
+            if((gHours[e.id]||0)+2>72) return;
+            var s=-(gHours[e.id]||0); if(s>bs){bs=s;cand=a;} });
+          if(cand){ cand.ext=true; cand.t='08:00-20:00'; gHours[cand.id]=(gHours[cand.id]||0)+2; need--; continue; }
+          // (b) คนดึก split+OT เพิ่มพีคเที่ยงสั้นวันเดียวกัน (ห้ามถ้าเมื่อวานเข้าดึก — ต้องพักก่อน 10 โมง)
+          var c2=null;
+          weeks[bid][d].night.forEach(function(a){ if(c2||a.locked) return; var e=Emap[a.id]; if(!e) return;
+            if(!e.canSplit||!e.canOt) return; if(e.positions.indexOf('cook')<0) return;
+            if(prevNight(e.id,d)) return;
+            if(slotsOfDay(e.id,d).indexOf('lunch')>=0) return;
+            if((gHours[e.id]||0)+4>72) return;
+            c2=e; });
+          if(c2){ doAssign(bid,d,'lunch',c2,'cook',c2.branchId!==bid?'loan':'home'); need--; continue; }
+          break; } }); })(d); } };
+  flexPeaks();
   // ขัดเกลา: สลับคู่คนในวันเดียวกันถ้าคะแนนรวมดีขึ้น (คู่รถ · รถรอบเดียว · กะถนัด) — ครบเท่าเดิม ชั่วโมงเท่าเดิม
   var swapServe=function(e,cell,d){
     if(e.positions.indexOf(cell.a.pos)<0) return false;
@@ -601,7 +633,8 @@ function personCard(a,bid,d){ var m=POSM[a.pos]||{}; var e=empById(a.id)||{name:
   if(loan){ var from=(S.branches.find(function(b){return b.id===a.homeBranch;})||{}).short||'';
     badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#C4571E;background:#FFE9D6;padding:2px 7px;border-radius:6px;margin-top:4px;margin-right:4px;">'+svg(I_arrow,10,'#C4571E',2)+'ช่วยจาก '+esc(from)+'</span>'; }
   if(cg){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#6A4CC0;background:#EDE8FB;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_car,10,'#6A4CC0',1.8)+'คู่รถ</span>'; }
-  if((window._splitToday||{})[a.id]>1){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_clock,10,'#B5651D',2)+'กะเบรค (2 พีค)</span>'; }
+  if((window._splitToday||{})[a.id]>1){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_clock,10,'#B5651D',2)+'คุม 2 พีค</span>'; }
+  if(a.ext){ badges+='<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:2px 7px;border-radius:6px;margin-top:4px;">'+svg(I_clock,10,'#B5651D',2)+'กะยาว 12 ชม. (OT)</span>'; }
   if(badges) h+='<div>'+badges+'</div>';
   h+='</div>';
   h+='<span class="num" style="font-weight:700;font-size:12.5px;color:'+(a.t?'#B5651D':'#3A4A55')+';background:'+(a.t?'#FFF1D6':'#F1F5F8')+';padding:5px 10px;border-radius:9px;white-space:nowrap;flex:0 0 auto;">'+esc(a.t||SLOTM[a.slot].time)+'</span>';
