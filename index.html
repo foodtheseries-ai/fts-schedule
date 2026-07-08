@@ -664,8 +664,12 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
   }
   var offToday=(sol.offByDay&&sol.offByDay[sd])||[];
   if(offToday.length){ h+='<div style="display:flex;align-items:flex-start;gap:9px;background:#F4ECE0;border-radius:13px;padding:10px 13px;margin-top:11px;">'+svg(I_cal2,15,'#9A7A55',2)+'<span style="flex:1;font-size:11.5px;color:#7A6A57;line-height:1.5;"><span style="font-weight:700;">หยุดวันนี้:</span> '+esc(offToday.join(' · '))+'</span></div>'; }
+  // คนเวลาพิเศษ (a.t) แยกหมวดต่างหาก — ไม่ปนกับหัวข้อกะมาตรฐาน กันเข้าใจผิด (เช่น อุ้ม 08-12 ห้ามไปอยู่ใต้หัว 08-18)
+  var specials=[];
   SLOTS.forEach(function(slot){ var m=SLOTM[slot];
-    var list=daySol[slot]||[];
+    var full=daySol[slot]||[];
+    var list=full.filter(function(a){ return !a.t; });
+    full.forEach(function(a){ if(a.t){ a.slot=slot; specials.push(a); } });
     if(!list.length && m.peak && !editable) return;   // พีคว่างในโหมดดูอย่างเดียว = ซ่อน
     if(!list.length && !editable) return;
     h+='<div style="display:flex;align-items:center;gap:9px;margin:14px 2px 8px;"><span style="width:9px;height:9px;border-radius:50%;background:'+m.dot+';flex:0 0 auto;"></span><span style="font-weight:700;font-size:14px;">'+m.label+'</span>'+
@@ -675,6 +679,13 @@ function renderDay(bid,branch,dates,todayIdx,sd,sol){
     if(editable) h+='<button onclick="openAddPerson(\''+bid+'\','+sd+',\''+slot+'\')" style="border:1.5px dashed #E2D3C0;background:#fff;border-radius:13px;padding:9px;cursor:pointer;font-weight:700;font-size:12px;color:#9A7A55;display:flex;align-items:center;justify-content:center;gap:5px;">'+svg(I_plus,14,'#9A7A55',2.2)+'เพิ่มคน'+m.label+'</button>';
     h+='</div>';
   });
+  if(specials.length){
+    specials.sort(function(a,b){ return String(a.t).localeCompare(String(b.t)); });
+    h+='<div style="display:flex;align-items:center;gap:9px;margin:14px 2px 8px;"><span style="width:9px;height:9px;border-radius:50%;background:#B5651D;flex:0 0 auto;"></span><span style="font-weight:700;font-size:14px;">เวลาพิเศษ</span>'+
+      '<span style="font-size:9.5px;font-weight:700;color:#B5651D;background:#FFF1D6;padding:1px 7px;border-radius:6px;">เวลาไม่ตรงกะมาตรฐาน</span>'+
+      '<span style="font-size:12px;color:#5A7488;">'+specials.length+' คน</span></div>';
+    h+='<div style="display:flex;flex-direction:column;gap:8px;">'+specials.map(function(a){ return personCard(a,bid,sd); }).join('')+'</div>';
+  }
   if(!editable){ h+='<div style="text-align:center;margin-top:16px;font-size:11.5px;color:#9A8C7C;">นี่คือพรีวิว — กด "จัดตารางอัตโนมัติ" ในแท็บตั้งค่าเพื่อจัดจริงและแก้ไขได้</div>'; }
   h+='<div style="height:8px;"></div>';
   return h;
@@ -691,8 +702,11 @@ function renderWeek(bid,branch,dates,todayIdx,sol){
     h+='<span style="font-weight:700;font-size:13px;">'+DOWF[d]+' '+dates[d].getDate()+(isToday?' <span style="font-size:9.5px;color:#C77A1B;background:#FFF1D6;padding:1px 6px;border-radius:6px;">วันนี้</span>':'')+'</span>';
     h+='<span style="font-size:10.5px;font-weight:700;color:'+(gen?'#2C7A56':'#9A8C7C')+';">'+(gen?'จัดแล้ว':'พรีวิว')+(dShort.length?(' · <span style="color:#C0392B;">ขาด '+dShort.length+'</span>'):'')+'</span>';
     h+='</div>';
-    // แถวกะ: เช้า/ดึก โชว์เสมอ · กะกลาง+คู่เบรคโชว์เมื่อมีคน · มีเวลากำกับทุกแถว (ลดความเข้าใจผิด)
-    SLOTS.forEach(function(slot){ var list=dd[slot]||[]; var m=SLOTM[slot];
+    // แถวกะ: เช้า/ดึก โชว์เสมอ · กะกลาง+คู่เบรคโชว์เมื่อมีคน · มีเวลากำกับทุกแถว · คนเวลาพิเศษแยกแถวต่างหาก
+    var wSpec=[];
+    SLOTS.forEach(function(slot){ var full=dd[slot]||[]; var m=SLOTM[slot];
+      var list=full.filter(function(a){ return !a.t; });
+      full.forEach(function(a){ if(a.t){ a.slot=slot; wSpec.push(a); } });
       if(!list.length && slot!=='morning' && slot!=='night') return;
       h+='<div style="display:flex;align-items:flex-start;gap:7px;padding:3px 0;">'+
         '<span style="display:flex;align-items:center;gap:4px;flex:0 0 74px;margin-top:2px;">'+
@@ -700,6 +714,16 @@ function renderWeek(bid,branch,dates,todayIdx,sol){
           '<span class="num" style="font-size:9.5px;font-weight:700;color:'+(m.peak?'#B5651D':'#7A6A57')+';white-space:nowrap;">'+m.time.replace('–','-')+'</span></span>'+
         '<div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;">'+(list.length?list.map(function(a){ a.slot=slot; return nameChipMini(a,bid,d,slot,false); }).join(''):'<span style="font-size:10.5px;color:#C0B4A2;padding-top:2px;">—</span>')+'</div></div>';
     });
+    if(wSpec.length){
+      wSpec.sort(function(a,b){ return String(a.t).localeCompare(String(b.t)); });
+      h+='<div style="display:flex;align-items:flex-start;gap:7px;padding:3px 0;">'+
+        '<span style="display:flex;align-items:center;gap:4px;flex:0 0 74px;margin-top:2px;">'+
+          '<span style="width:7px;height:7px;border-radius:50%;background:#B5651D;flex:0 0 auto;"></span>'+
+          '<span style="font-size:9.5px;font-weight:700;color:#B5651D;white-space:nowrap;">เวลาพิเศษ</span></span>'+
+        '<div style="display:flex;flex-wrap:wrap;gap:4px;flex:1;">'+wSpec.map(function(a){
+          return '<span style="display:inline-flex;align-items:center;gap:4px;">'+nameChipMini(a,bid,d,a.slot,false)+
+            '<span class="num" style="font-size:9px;font-weight:700;color:#B5651D;">'+esc(a.t)+'</span></span>'; }).join('')+'</div></div>';
+    }
     h+='</div>';
   })(d); }
   h+='</div><div style="height:8px;"></div>';
