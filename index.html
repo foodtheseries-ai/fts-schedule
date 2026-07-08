@@ -227,12 +227,15 @@ function solveAll(state, opts){
       if(e.positions.indexOf(c.pos)<0) return; if(e.off.indexOf(c.d)>=0) return; if(slotsOfDay(e.id,c.d).length) return;
       var key=e.id+'|'+c.d; if(seen[key]) return; seen[key]=1;
       suggestions.push({empId:e.id,name:e.name,from:brName[e.branchId],d:c.d,slot:c.slot,pos:c.pos}); }); });
+    // loaners จากตารางจริง (รวมที่ pre-place จาก grid ที่เก็บไว้ — ไม่ใช่แค่ pass ยืมรอบนี้)
+    var loanersReal=[]; for(var dl=0;dl<7;dl++){ (function(d){ SLOTS.forEach(function(sl){ week[d][sl].forEach(function(a){
+      if(a.via==='loan'){ var he=Emap[a.id]; loanersReal.push({name:he?he.name:'?', fromId:a.homeBranch, from:brName[a.homeBranch]||'', d:d, slot:sl, pos:a.pos}); } }); }); })(dl); }
     var noRest=bEmps.filter(function(e){return workDays(e.id)>=7 && !e.canOt;}).map(function(e){return e.name;});
     var unscheduled=bEmps.filter(function(e){return !scheduled[e.id];}).map(function(e){return {id:e.id,name:e.name}; });
     var fair=bEmps.map(function(e){ var days=workDays(e.id), hours=gHours[e.id]||0; return {id:e.id,name:e.name,days:days,hours:hours}; });
     var offByDay={}; for(var d3=0;d3<7;d3++){ (function(d){ offByDay[d]=bEmps.filter(function(e){return e.off.indexOf(d)>=0;}).map(function(e){return e.name;}); })(d3); }
     result[bid]={ week:week, coverShort:coverShort, peakShort:peakShort, shortDays:shortDays, noRest:noRest,
-      unscheduled:unscheduled, fair:fair, loaners:loaners[bid], suggestions:suggestions, offByDay:offByDay };
+      unscheduled:unscheduled, fair:fair, loaners:loanersReal, suggestions:suggestions, offByDay:offByDay };
   });
   return result;
 }
